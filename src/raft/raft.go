@@ -76,6 +76,12 @@ type Raft struct {
 	votedFor int // 出事为 -1
 	electionStartTime time.Time
 	electionTimeOut time.Duration
+
+
+	logs []Entry
+	next []int // 日志匹配试探点
+	match []int // 日志同步成功后的匹配点
+	commitId int
 }
 
 // return currentTerm and whether this server
@@ -215,6 +221,16 @@ func (rf *Raft)becomeLeader() {
 			"%s, Only candidate can become Leader", rf.role)
 		return
 	}
+
+	//3 next index 在 becomeleader的时候初始化，视图在当选leader的term内有效。
+	//遍历next 数组，将每个peer 的值设置为leader 日志长度，len(log)，即从这个位置试探，
+	//如果不行则往前缩; 悲观下，最开始是匹配的。
+	//Matchindex 设置为0，leader上台后，不清楚和谁匹配多少。
+	for i := 0; i < len(rf.next); i++ {
+		rf.next[i] = len(rf.logs)
+		rf.match[i] = 0
+	}
+
 	LOG(rf.me, rf.curTerm, DLeader, "%s -> Leader, For T%d",
 		rf.role, rf.curTerm)
 	rf.role = Leader
@@ -240,6 +256,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.curTerm = 0
 	rf.role = Follower
 	rf.votedFor = -1
+
+	rf.logs = append(rf.logs, Entry{}) //[0]位置 空的日志，避免一些边界判断.
+	rf.next = make([]int, len(rf.peers))
+	rf.match = make([]int, len(rf.peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

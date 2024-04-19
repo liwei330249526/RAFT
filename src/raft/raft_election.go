@@ -11,6 +11,8 @@ type RequestVoteArgs struct {
 	// Your data here (PartA, PartB).
 	CandidateTerm int
 	CandidateId   int
+	lastLogId     int // 最新的日志的id
+	lastLogTerm   int // 最新的日志的term
 }
 
 // example RequestVote RPC reply structure.
@@ -30,17 +32,26 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.VotedGrand = false
 	if args.CandidateTerm < rf.curTerm {
 		reply.VotedGrand = false
-		LOG(rf.me, rf.curTerm, DVote, "%d reject, term %d is letter", args.CandidateId, args.CandidateTerm)
+		LOG(rf.me, rf.curTerm, DVote, "%d reject vote, term %d is letter", args.CandidateId, args.CandidateTerm)
 		return
 	}
 
-	if args.CandidateTerm > rf.curTerm {
+	if args.CandidateTerm > rf.curTerm {  // todo 检查边界，是否 ==
 		rf.becomeFollower(args.CandidateTerm)
+	}
+
+	// 处理日志时，增加最新任期索引的判断
+	if !(rf.isCandidateMoreUp(args.lastLogId, args.lastLogTerm)) {
+		indexLog := len(rf.logs)-1
+		termLog := rf.logs[indexLog].Term
+		LOG(rf.me, rf.curTerm, DVote, "%d reject vote, candidate log T[d], id[d] not up me T[%d], id[%d]",
+			args.lastLogId, args.lastLogTerm, termLog, indexLog)
+		return
 	}
 
 	if rf.votedFor != -1 && rf.votedFor != args.CandidateTerm {
 		reply.VotedGrand = false
-		LOG(rf.me, rf.curTerm, DVote, "%d reject, already vote for other %d", args.CandidateId, rf.votedFor)
+		LOG(rf.me, rf.curTerm, DVote, "%d reject vote, already vote for other %d", args.CandidateId, rf.votedFor)
 		return
 	}
 
@@ -159,11 +170,29 @@ func (rf *Raft) starElection(term int) bool {
 			continue
 		}
 
+		lastId := len(rf.logs)-1
+		lastTerm := rf.logs[lastId].Term
 		req := &RequestVoteArgs{
 			CandidateTerm: rf.curTerm,
 			CandidateId:   rf.me,
+			lastLogId: lastId,
+			lastLogTerm: lastTerm,
 		}
 		go askVote(i, req)
 	}
 	return true
+}
+
+// 投票者的日志是否更新
+func (rf *Raft) isCandidateMoreUp(candidateIndex, candidateTerm int) bool {
+	//1 任期更大的更新。
+	//2 任期相等， 则日志id更大的更新。
+	index := len(rf.logs)-1
+	term := rf.logs[index].Term
+
+	if term != candidateTerm  {
+		return candidateTerm > term
+	}
+
+	return candidateIndex >= index
 }
