@@ -11,8 +11,8 @@ type RequestVoteArgs struct {
 	// Your data here (PartA, PartB).
 	CandidateTerm int
 	CandidateId   int
-	lastLogId     int // 最新的日志的id
-	lastLogTerm   int // 最新的日志的term
+	LastLogId     int // 最新的日志的id
+	LastLogTerm   int // 最新的日志的term
 }
 
 // example RequestVote RPC reply structure.
@@ -40,12 +40,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.becomeFollower(args.CandidateTerm)
 	}
 
-	// 处理日志时，增加最新任期索引的判断
-	if !(rf.isCandidateMoreUp(args.lastLogId, args.lastLogTerm)) {
+	// 处理日志时，增加最新任期索引的判断, 如果投票者日志不是更新的，则返回false
+	if !(rf.isCandidateMoreUp(args.LastLogId, args.LastLogTerm)) {
 		indexLog := len(rf.logs)-1
 		termLog := rf.logs[indexLog].Term
 		LOG(rf.me, rf.curTerm, DVote, "%d reject vote, candidate log T[d], id[d] not up me T[%d], id[%d]",
-			args.lastLogId, args.lastLogTerm, termLog, indexLog)
+			args.LastLogId, args.LastLogTerm, termLog, indexLog)
 		return
 	}
 
@@ -175,8 +175,8 @@ func (rf *Raft) starElection(term int) bool {
 		req := &RequestVoteArgs{
 			CandidateTerm: rf.curTerm,
 			CandidateId:   rf.me,
-			lastLogId: lastId,
-			lastLogTerm: lastTerm,
+			LastLogId:     lastId,
+			LastLogTerm:   lastTerm,
 		}
 		go askVote(i, req)
 	}

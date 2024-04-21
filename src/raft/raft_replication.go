@@ -17,6 +17,8 @@ type RequestReplicaArgs struct {
 	PreLogId int   // 上一条日志的id
 	PreTerm int    // 上一条日志的term
 	Logs []Entry   // 本次发送日志的内容
+
+	LeaderCommittedId int // leader 发的日志提交id
 }
 
 type RequestReplicaReply struct {
@@ -30,7 +32,8 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	defer rf.mu.Unlock()
     // 默认消息
 
-    LOG(rf.me, rf.curTerm, DDebug, "<- S%d, Recive log, Pre[%d]T%d, len()=%d", args.PreLogId, args.PreTerm, len(args.Logs))
+    LOG(rf.me, rf.curTerm, DDebug, "<- S%d, Recive log, Pre[%d]T%d, len()=%d, argCommitId %d , commitid %d",
+    	args.LeaderId, args.PreLogId, args.PreTerm, len(args.Logs), args.LeaderCommittedId, rf.committedId)
 
 	reply.Term = rf.curTerm
 	reply.Result = false
@@ -55,10 +58,24 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 		return
 	}
 
-	// append 日志， append(rf.logs[args.preid+1], args. logs)
-	rf.logs = append(rf.logs[args.PreLogId+1:], append([]Entry{}, args.Logs...)...)
+	// append 日志， append(rf.logs[args.preid+1], args. logs) , err
+	rf.logs = append(rf.logs[:args.PreLogId+1], append([]Entry{}, args.Logs...)...)
 
 	// todo()：handle leader commit
+	// 如果args 的commited index 大于 commited index， 则执行操作
+	if args.LeaderCommittedId > rf.committedId {
+		// 更新 commited index
+		LOG(rf.me, rf.curTerm, DApply, "Follower update the commit index %d->%d", rf.committedId, args.LeaderCommittedId)
+		rf.committedId = args.LeaderCommittedId
+
+		// 如果 commited index大于本地最大日志索引，则设置commited index
+		if rf.committedId > len(rf.logs)-1 {
+			rf.committedId = len(rf.logs)-1
+		}
+
+		// 给   applyCond 发送信号
+		rf.applyCond.Signal()
+	}
 
 	rf.resetElection()
 	reply.Result = true
@@ -87,13 +104,18 @@ func (rf *Raft)startReplica(term int) bool {
 			return
 		}
 
+		// 判断任期和角色
+		// 如果上下文发生变化则返回false
+		if !(rf.role == Leader && rf.curTerm == term) {
+			LOG(rf.me, rf.curTerm, DLog, "Leader[T%d] -> %s[T%d]", term, rf.role, rf.curTerm)
+			return
+		}
+
+
 		//4 reply 处理，如果不成功，则更新next数组，尝试再次试探，这里每次回退一个term，即 next[peer]值设置为了该term 的第一条日志。
 		//如果成功则更新match数组，记录这里匹配了。 算法是， arg.preid + len(arg.logs), 对本次arg 的计算。
 		//不能用本地log，因为本地log可能会在本次rpc的时候， 本地log可能还会有更新。
-		if resp.Result { // 算法正确，先计算 match， 根据match 赋值 next
-			rf.match[peer] = args.PreLogId + len(args.Logs)
-			rf.next[peer] = rf.match[peer] + 1
-		} else {
+		if !(resp.Result) {
 			//preId := args.PreLogId
 			//preTerm := args.PreTerm
 			//for id := preId; id >= 0; id-- { // todo: 核对算法是否正确
@@ -115,7 +137,18 @@ func (rf *Raft)startReplica(term int) bool {
 			return
 		}
 
+		// 算法正确，先计算 match， 根据match 赋值 next
+		rf.match[peer] = args.PreLogId + len(args.Logs)
+		rf.next[peer] = rf.match[peer] + 1
+
 		//5 todo： 更新 commitindex。
+		mjId := rf.getMaxMajorIndex()
+		if mjId > rf.committedId {
+			LOG(rf.me, rf.curTerm, DApply, "Leader update the commit index %d->%d", rf.committedId, mjId)
+
+			rf.committedId = mjId
+			rf.applyCond.Signal()
+		}
 
 		return
 	}
@@ -145,6 +178,7 @@ func (rf *Raft)startReplica(term int) bool {
 			PreTerm: preTerm,
 			PreLogId: preId,
 			Logs: append([]Entry{}, rf.logs[preId+1:]...),
+			LeaderCommittedId: rf.committedId,
 		}
 		go replicaToPeer(i, args) // 这里要开启线程执行发送, 具体的发送成功或失败，我不管
 	}

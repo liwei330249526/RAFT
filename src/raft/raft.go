@@ -37,7 +37,7 @@ const (
 
 const minElectionTimeout = time.Millisecond * 250
 const maxElectionTimeout = time.Millisecond * 400
-const replicaInterval = time.Millisecond * 200 // 比选举下届要小，才能抑制选举
+const replicaInterval = time.Millisecond * 80 // 比选举下届要小，才能抑制选举
 
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or
@@ -78,10 +78,14 @@ type Raft struct {
 	electionTimeOut time.Duration
 
 
-	logs []Entry
-	next []int // 日志匹配试探点
-	match []int // 日志同步成功后的匹配点
-	commitId int
+	logs        []Entry
+	next        []int // 日志匹配试探点
+	match       []int // 日志同步成功后的匹配点
+
+	lastApplyedId int  // 上次应用的日志index
+	committedId int // 已提交的日志index
+	applyCh chan ApplyMsg
+	applyCond *sync.Cond
 }
 
 // return currentTerm and whether this server
@@ -155,13 +159,28 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
+	//index := -1
+	//term := -1
+	//isLeader := true
 
 	// Your code here (PartB).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
-	return index, term, isLeader
+	if rf.role != Leader {
+		return -1, -1, false
+	}
+
+	cmd := Entry{ // 问题， id， 和term 怎么赋值
+		ValidCmd:true,
+		Id: len(rf.logs),
+		Cmd: command,
+		Term:rf.curTerm,
+	}
+	rf.logs = append(rf.logs, cmd)
+	LOG(rf.me, rf.curTerm, DLeader, "Leader accept log [%d]T%d", cmd.Id, cmd.Term)
+
+	return  cmd.Id , cmd.Term, true
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -236,6 +255,7 @@ func (rf *Raft)becomeLeader() {
 	rf.role = Leader
 }
 
+
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -261,11 +281,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.next = make([]int, len(rf.peers))
 	rf.match = make([]int, len(rf.peers))
 
+	rf.lastApplyedId = 0 // todo: 初始化为0
+	rf.committedId = 0
+	rf.applyCh = applyCh
+	rf.applyCond = sync.NewCond(&rf.mu)
+
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
 	// start ticker goroutine to start elections
 	go rf.electionTicker()
+
+	go rf.applyTicker()
 
 	return rf
 }
