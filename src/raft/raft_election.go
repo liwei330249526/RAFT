@@ -58,6 +58,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	LOG(rf.me, rf.curTerm, DVote, "%d voted.", args.CandidateId)
 	reply.VotedGrand = true
 	rf.votedFor = args.CandidateId
+	rf.persist()
 	rf.resetElection()
 	return
 }

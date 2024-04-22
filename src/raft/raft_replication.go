@@ -38,6 +38,7 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	reply.Term = rf.curTerm
 	reply.Result = false
 
+
     // 任期对齐
 	if args.LeaderTerm < rf.curTerm {
 		LOG(rf.me, rf.curTerm, DLog, "<- S%d, reject log", args.LeaderId)
@@ -45,6 +46,9 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	}
 
 	rf.becomeFollower(args.LeaderTerm)
+
+	// 如论成功或失败，只要认可对方是 leader 则自己要重置选举
+	defer rf.resetElection()
 
 	// 如果 args 的preId 大于本日志 len， 则返回false。 ;
 	if args.PreLogId >= len(rf.logs) {
@@ -60,7 +64,7 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 
 	// append 日志， append(rf.logs[args.preid+1], args. logs) , err
 	rf.logs = append(rf.logs[:args.PreLogId+1], append([]Entry{}, args.Logs...)...)
-
+	rf.persist()
 	// todo()：handle leader commit
 	// 如果args 的commited index 大于 commited index， 则执行操作
 	if args.LeaderCommittedId > rf.committedId {
@@ -77,7 +81,7 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 		rf.applyCond.Signal()
 	}
 
-	rf.resetElection()
+	//rf.resetElection()
 	reply.Result = true
 	return
 }
@@ -125,6 +129,7 @@ func (rf *Raft)startReplica(term int) bool {
 			//	rf.next[peer] = id
 			//}
 
+			preNext := rf.next[peer]
 			pId := rf.next[peer]-1
 			pTerm := rf.logs[pId].Term
 			for ; pId > 0; pId-- {
@@ -133,6 +138,9 @@ func (rf *Raft)startReplica(term int) bool {
 				}
 			}
 			rf.next[peer] = pId+1
+			// 强制 next[peer] 单调递减
+			rf.next[peer] = Mmin(rf.next[peer], preNext)
+
 			LOG(rf.me, rf.curTerm, DLog, "Log id not match for %d, update for %d ", args.PreTerm, rf.next[peer])
 			return
 		}
@@ -198,4 +206,12 @@ func (rf *Raft) replicaTicker(term int) {
 
 		time.Sleep(replicaInterval)
 	}
+}
+
+// 返回较小值
+func Mmin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

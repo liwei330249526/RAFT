@@ -99,44 +99,6 @@ func (rf *Raft) GetState() (int, bool) {
 	return rf.curTerm, rf.role == Leader
 }
 
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-// before you've implemented snapshots, you should pass nil as the
-// second argument to persister.Save().
-// after you've implemented snapshots, pass the current snapshot
-// (or nil if there's not yet a snapshot).
-func (rf *Raft) persist() {
-	// Your code here (PartC).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
-}
-
-// restore previously persisted state.
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	// Your code here (PartC).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
-}
-
 // the service says it has created a snapshot that has
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
@@ -178,6 +140,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Term:rf.curTerm,
 	}
 	rf.logs = append(rf.logs, cmd)
+	rf.persist()
 	LOG(rf.me, rf.curTerm, DLeader, "Leader accept log [%d]T%d", cmd.Id, cmd.Term)
 
 	return  cmd.Id , cmd.Term, true
@@ -212,10 +175,16 @@ func (rf *Raft)becomeFollower(term int) {
 	LOG(rf.me, rf.curTerm, DLog, "%s -> Follower, For T%d->T%d",
 		rf.role, rf.curTerm, term)
 	rf.role = Follower
+	sholdPersist := false
 	if term > rf.curTerm {
+		sholdPersist = true
 		rf.votedFor = -1 // 新的任期，有了投票能力
 	}
 	rf.curTerm = term
+	if sholdPersist {
+		rf.persist()
+	}
+
 	return
 }
 // 转为候选者
@@ -230,6 +199,7 @@ func (rf *Raft)becomeCandidate() {
 	rf.role = Candidate
 	rf.curTerm++
 	rf.votedFor = rf.me
+	rf.persist()
 	return
 }
 
