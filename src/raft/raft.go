@@ -225,6 +225,26 @@ func (rf *Raft)becomeLeader() {
 	rf.role = Leader
 }
 
+func (rf *Raft) FirstIndexOfTerm(term int) int {
+
+
+	//for ;id >= 0; id-- {
+	//	if rf.logs[id].Term != term { // id 的日志是前一个任期的了，则返回id+1
+	//		break
+	//	}
+	//}
+	//return id+1
+
+	for i, entry := range rf.logs {
+		if entry.Term == term {
+			return i
+		} else if entry.Term > term {
+			break
+		}
+	}
+	return InvalidIndex
+}
+
 
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this

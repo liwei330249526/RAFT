@@ -2,6 +2,11 @@ package raft
 
 import "time"
 
+const (
+	InvalidTerm  = 0
+	InvalidIndex = 0
+)
+
 type Entry struct {
 	ValidCmd bool // 是否需要应用到状态机
 	Id int        // 日志索引
@@ -25,6 +30,9 @@ type RequestReplicaReply struct {
 	// Your data here (PartA).
 	Term       int // follower 任期
 	Result     bool // 复制成功
+
+	ConflictTerm int // 冲突任期
+	ConflictId int // 冲突index
 }
 
 func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaReply) {
@@ -53,12 +61,18 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	// 如果 args 的preId 大于本日志 len， 则返回false。 ;
 	if args.PreLogId >= len(rf.logs) {
 		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreLogId:%d >= len me log %d ", args.LeaderId, args.PreLogId, len(rf.logs)-1)
+		reply.ConflictTerm = InvalidTerm
+		reply.ConflictId = len(rf.logs)
 		return
 	}
 
 	// 如果 args.preTerm != rf.logs[preId].term,  return false
 	if args.PreTerm != rf.logs[args.PreLogId].Term {
 		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreTerm:%d !=  me term %d ", args.LeaderId, args.PreTerm, rf.logs[args.PreLogId].Term)
+		conflictTerm := rf.logs[args.PreLogId].Term
+		firstId := rf.FirstIndexOfTerm(conflictTerm)
+		reply.ConflictTerm = conflictTerm
+		reply.ConflictId = firstId
 		return
 	}
 
@@ -129,15 +143,29 @@ func (rf *Raft)startReplica(term int) bool {
 			//	rf.next[peer] = id
 			//}
 
-			preNext := rf.next[peer]
-			pId := rf.next[peer]-1
-			pTerm := rf.logs[pId].Term
-			for ; pId > 0; pId-- {
-				if pTerm != rf.logs[pId].Term {
-					break
+			//-------------------------------------
+			preNext := rf.next[peer] // version1 这里是回溯到该任期的第一条日志
+			//pId := rf.next[peer]-1
+			//pTerm := rf.logs[pId].Term
+			//for ; pId > 0; pId-- {
+			//	if pTerm != rf.logs[pId].Term {
+			//		break
+			//	}
+			//}
+			//rf.next[peer] = pId+1
+			//--------------------------------------
+			//
+			if resp.ConflictTerm == InvalidTerm {
+				rf.next[peer] = resp.ConflictId
+			} else {
+				firstId := rf.FirstIndexOfTerm(resp.ConflictTerm) // 入参，传哪个， args.preid-1; or rf.next[peer]-1
+				if firstId != InvalidIndex {
+					rf.next[peer] = firstId
+				} else {
+					rf.next[peer] = resp.ConflictId
 				}
 			}
-			rf.next[peer] = pId+1
+
 			// 强制 next[peer] 单调递减
 			rf.next[peer] = Mmin(rf.next[peer], preNext)
 
@@ -151,7 +179,7 @@ func (rf *Raft)startReplica(term int) bool {
 
 		//5 todo： 更新 commitindex。
 		mjId := rf.getMaxMajorIndex()
-		if mjId > rf.committedId {
+		if mjId > rf.committedId && rf.logs[mjId].Term == rf.curTerm{ // figuer 8
 			LOG(rf.me, rf.curTerm, DApply, "Leader update the commit index %d->%d", rf.committedId, mjId)
 
 			rf.committedId = mjId
