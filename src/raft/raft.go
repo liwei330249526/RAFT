@@ -123,7 +123,24 @@ func (rf *Raft) GetState() (int, bool) {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (PartD).
+	//加锁
+	//if index <= lastIncludeIndex   || index > commitedId, err
+	//	lastIncludeIndex， lastIncludeTerm 赋值
+	//snapshot 赋值
+	//newLog 赋值[0] ， lastIncludeTerm
+	//newLog 赋值[1:]， idx+1: 截断日志
+	//persist()
 
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if index <= rf.logs.lastIncludeIndex || index > rf.committedId {
+		LOG(rf.me, rf.curTerm, DSnap, "Can't snapshot, index out (%d - %d]", rf.logs.lastIncludeIndex, rf.committedId)
+		return
+	}
+	rf.logs.doSnapshot(index, snapshot)
+	rf.persist()
+	return
 }
 
 // the service using Raft (e.g. a k/v server) wants to start

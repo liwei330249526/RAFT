@@ -99,3 +99,20 @@ func (rl *RaftLog) tailsLogs(start int) []Entry {
 	id := rl.idx(start)
 	return rl.tailLog[id:]
 }
+
+func (rl *RaftLog) doSnapshot(index int, snapshot []byte) {
+	//	lastIncludeIndex， lastIncludeTerm 赋值
+	//snapshot 赋值
+	//newLog 赋值[0] ， lastIncludeTerm
+	//newLog 赋值[1:]， idx+1: 截断日志
+	//persist()
+	localId := rl.idx(index)
+	rl.lastIncludeIndex = index
+	rl.lastIncludeTerm = rl.at(index).Term
+	rl.snapShort = snapshot
+
+	newLog := make([]Entry, 0)
+	newLog = append(newLog, Entry{Term: rl.lastIncludeTerm})
+	newLog = append(newLog, rl.tailLog[localId+1:]...)
+	rl.tailLog = newLog
+}
