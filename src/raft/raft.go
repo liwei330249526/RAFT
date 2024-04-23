@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -38,6 +39,22 @@ const (
 const minElectionTimeout = time.Millisecond * 250
 const maxElectionTimeout = time.Millisecond * 400
 const replicaInterval = time.Millisecond * 80 // 比选举下届要小，才能抑制选举
+
+func (rf *Raft) logString() string {
+	preTerm := rf.logs[0].Term
+	preStart := 0
+
+	ret := ""
+	for i := 0; i < len(rf.logs); i++ {
+		if rf.logs[i].Term != preTerm {
+			ret += fmt.Sprintf("[%d - %d]T%d",preStart, i-1, preTerm)
+			preTerm = rf.logs[i].Term
+			preStart = i
+		}
+	}
+	ret += fmt.Sprintf("[%d - %d]%dT",preStart, len(rf.logs)-1, preTerm)
+	return ret
+}
 
 // as each Raft peer becomes aware that successive log entries are
 // committed, the peer should send an ApplyMsg to the service (or

@@ -1,9 +1,17 @@
 package raft
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
+
+func (args *RequestVoteArgs) String() string {
+	return fmt.Sprintf("Candidate-%d T%d, Last:[%d]T%d", args.CandidateId, args.CandidateTerm, args.LastLogId, args.LastLogTerm)
+}
+func (reply *RequestVoteReply) String() string {
+	return fmt.Sprintf("T%d, VoteGranted: %v", reply.Term, reply.VotedGrand)
+}
 
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -28,6 +36,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (PartA, PartB).
 	rf.mu.Lock()
 	defer rf.mu.Unlock() // 必须加锁 --race 检测
+
+	LOG(rf.me, rf.curTerm, DDebug, "<- S%d, VoteAsked, Args=%v", args.CandidateId, args.String())
+
 	reply.Term = rf.curTerm
 	reply.VotedGrand = false
 	if args.CandidateTerm < rf.curTerm {
@@ -137,7 +148,10 @@ func (rf *Raft) starElection(term int) bool {
 		defer rf.mu.Unlock() // 必须加锁 --race 检测， 必须加在上面， 因为log 中用了临街资源
 		if !ret {
 			LOG(rf.me, rf.curTerm,DError, "ask vote from %d err", peer)
+			return
 		}
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, AskVote Reply=%v", peer, resp.String())
+
 		//rf.mu.Lock()
 		//defer rf.mu.Unlock() // 必须加锁 --race 检测
 		if resp.Term > term {
@@ -179,6 +193,8 @@ func (rf *Raft) starElection(term int) bool {
 			LastLogId:     lastId,
 			LastLogTerm:   lastTerm,
 		}
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, AskVote, Args=%v", i, req.String())
+
 		go askVote(i, req)
 	}
 	return true

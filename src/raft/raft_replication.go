@@ -1,11 +1,22 @@
 package raft
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
 	InvalidTerm  = 0
 	InvalidIndex = 0
 )
+func (args *RequestReplicaArgs) String() string {
+	return fmt.Sprintf("Leader-%d, T%d, Prev:[%d]T%d, (%d, %d], CommitIdx: %d",
+		args.LeaderId, args.LeaderTerm, args.PreLogId, args.PreTerm,
+		args.PreLogId, args.PreLogId+len(args.Logs), args.LeaderCommittedId)
+}
+func (reply *RequestReplicaReply) String() string {
+	return fmt.Sprintf("T%d, Sucess: %v, ConflictTerm: [%d]T%d", reply.Term, reply.Result, reply.ConflictId, reply.ConflictTerm)
+}
 
 type Entry struct {
 	ValidCmd bool // 是否需要应用到状态机
@@ -39,9 +50,10 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
     // 默认消息
-
-    LOG(rf.me, rf.curTerm, DDebug, "<- S%d, Recive log, Pre[%d]T%d, len()=%d, argCommitId %d , commitid %d",
-    	args.LeaderId, args.PreLogId, args.PreTerm, len(args.Logs), args.LeaderCommittedId, rf.committedId)
+	LOG(rf.me, rf.curTerm, DDebug, "<- S%d, Appended, Args=%v", args.LeaderId, args.String())
+	//
+	//LOG(rf.me, rf.curTerm, DDebug, "<- S%d, Recive log, Pre[%d]T%d, len()=%d, argCommitId %d , commitid %d",
+    //	args.LeaderId, args.PreLogId, args.PreTerm, len(args.Logs), args.LeaderCommittedId, rf.committedId)
 
 	reply.Term = rf.curTerm
 	reply.Result = false
@@ -56,7 +68,13 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	rf.becomeFollower(args.LeaderTerm)
 
 	// 如论成功或失败，只要认可对方是 leader 则自己要重置选举
-	defer rf.resetElection()
+	defer func() {
+		rf.resetElection()
+		if !reply.Result {
+			LOG(rf.me, rf.curTerm, DLog2, "<- S%d, Follower Conflict: [%d]T%d", args.LeaderId, reply.ConflictId, reply.ConflictTerm)
+			LOG(rf.me, rf.curTerm, DDebug, "Follower log=%v", rf.logString())
+		}
+	}()
 
 	// 如果 args 的preId 大于本日志 len， 则返回false。 ;
 	if args.PreLogId >= len(rf.logs) {
@@ -109,12 +127,15 @@ func (rf *Raft)startReplica(term int) bool {
 	replicaToPeer := func(peer int, args *RequestReplicaArgs) {
 		resp := &RequestReplicaReply{}
 		ok := rf.sendRequestReplica(peer, args, resp)
+
 		rf.mu.Lock()
 		defer rf.mu.Unlock() // 必须加锁 --race 检测
 		if !ok {
 			LOG(rf.me, rf.curTerm, DLog, "->S%d, Lost", peer)
 			return
 		}
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Append, Reply=%v", peer, resp.String())
+
 		//rf.mu.Lock()
 		//defer rf.mu.Unlock() // 必须加锁 --race 检测
 		if resp.Term > rf.curTerm {
@@ -169,7 +190,10 @@ func (rf *Raft)startReplica(term int) bool {
 			// 强制 next[peer] 单调递减
 			rf.next[peer] = Mmin(rf.next[peer], preNext)
 
-			LOG(rf.me, rf.curTerm, DLog, "Log id not match for %d, update for %d ", args.PreTerm, rf.next[peer])
+			//LOG(rf.me, rf.curTerm, DLog, "Log id not match for %d, update for %d ", args.PreTerm, rf.next[peer])
+			LOG(rf.me, rf.curTerm, DLog, "-> S%d, Not matched at Prev=[%d]T%d, Try next Prev=[%d]T%d", peer, args.PreLogId, rf.logs[args.PreLogId].Term, rf.next[peer]-1, rf.logs[rf.next[peer]-1].Term)
+			LOG(rf.me, rf.curTerm, DDebug, "Leader log=%v", rf.logString())
+
 			return
 		}
 
@@ -216,6 +240,7 @@ func (rf *Raft)startReplica(term int) bool {
 			Logs: append([]Entry{}, rf.logs[preId+1:]...),
 			LeaderCommittedId: rf.committedId,
 		}
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Append, %v", i, args.String())
 		go replicaToPeer(i, args) // 这里要开启线程执行发送, 具体的发送成功或失败，我不管
 	}
 	// 否则返回成功
