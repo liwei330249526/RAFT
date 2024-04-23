@@ -9,7 +9,7 @@ func (rf *Raft)applyTicker() {
 		rf.applyCond.Wait()
 		applyEntries := make([]Entry, 0)
 		for i := rf.lastApplyedId+1; i <= rf.committedId; i++ { // 注意从 lastApplyedId+1 复制
-			applyEntries = append(applyEntries, rf.logs[i])
+			applyEntries = append(applyEntries, rf.logs.at(i))
 		}
 		rf.mu.Unlock()
 

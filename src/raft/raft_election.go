@@ -53,8 +53,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// 处理日志时，增加最新任期索引的判断, 如果投票者日志不是更新的，则返回false
 	if !(rf.isCandidateMoreUp(args.LastLogId, args.LastLogTerm)) {
-		indexLog := len(rf.logs)-1
-		termLog := rf.logs[indexLog].Term
+		indexLog := rf.logs.size()-1
+		termLog := rf.logs.at(indexLog).Term
 		LOG(rf.me, rf.curTerm, DVote, "%d reject vote, candidate log T[d], id[d] not up me T[%d], id[%d]",
 			args.LastLogId, args.LastLogTerm, termLog, indexLog)
 		return
@@ -160,7 +160,7 @@ func (rf *Raft) starElection(term int) bool {
 		}
 
 		if rf.role != Candidate || rf.curTerm != term {
-			LOG(rf.me, rf.curTerm,DError, "me role %v or term %d change", rf.role, rf.curTerm)
+			LOG(rf.me, rf.curTerm,DDebug, "me role %v or term %d change, not Candidate", rf.role, rf.curTerm)
 			return
 		}
 
@@ -185,8 +185,8 @@ func (rf *Raft) starElection(term int) bool {
 			continue
 		}
 
-		lastId := len(rf.logs)-1
-		lastTerm := rf.logs[lastId].Term
+		lastId := rf.logs.size()-1
+		lastTerm := rf.logs.at(lastId).Term
 		req := &RequestVoteArgs{
 			CandidateTerm: rf.curTerm,
 			CandidateId:   rf.me,
@@ -204,8 +204,8 @@ func (rf *Raft) starElection(term int) bool {
 func (rf *Raft) isCandidateMoreUp(candidateIndex, candidateTerm int) bool {
 	//1 任期更大的更新。
 	//2 任期相等， 则日志id更大的更新。
-	index := len(rf.logs)-1
-	term := rf.logs[index].Term
+	index := rf.logs.size()-1
+	term := rf.logs.at(index).Term
 
 	if term != candidateTerm  {
 		return candidateTerm > term

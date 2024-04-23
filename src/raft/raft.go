@@ -41,18 +41,19 @@ const maxElectionTimeout = time.Millisecond * 400
 const replicaInterval = time.Millisecond * 80 // 比选举下届要小，才能抑制选举
 
 func (rf *Raft) logString() string {
-	preTerm := rf.logs[0].Term
-	preStart := 0
+	preTerm := rf.logs.lastIncludeTerm
+	preStart := rf.logs.lastIncludeIndex
 
 	ret := ""
-	for i := 0; i < len(rf.logs); i++ {
-		if rf.logs[i].Term != preTerm {
-			ret += fmt.Sprintf("[%d - %d]T%d",preStart, i-1, preTerm)
-			preTerm = rf.logs[i].Term
-			preStart = i
+	for i := 0; i < len(rf.logs.tailLog); i++ {
+		if rf.logs.tailLog[i].Term != preTerm {
+			ret += fmt.Sprintf("[%d - %d]T%d",
+				preStart, i-1 + rf.logs.lastIncludeIndex, preTerm)
+			preTerm = rf.logs.tailLog[i].Term
+			preStart = i + rf.logs.lastIncludeIndex
 		}
 	}
-	ret += fmt.Sprintf("[%d - %d]%dT",preStart, len(rf.logs)-1, preTerm)
+	ret += fmt.Sprintf("[%d - %d]%dT",preStart, len(rf.logs.tailLog) + rf.logs.lastIncludeIndex, preTerm)
 	return ret
 }
 
@@ -95,7 +96,7 @@ type Raft struct {
 	electionTimeOut time.Duration
 
 
-	logs        []Entry
+	logs        *RaftLog
 	next        []int // 日志匹配试探点
 	match       []int // 日志同步成功后的匹配点
 
@@ -152,13 +153,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	cmd := Entry{ // 问题， id， 和term 怎么赋值
 		ValidCmd:true,
-		Id: len(rf.logs),
+		Id: rf.logs.size(),
 		Cmd: command,
 		Term:rf.curTerm,
 	}
-	rf.logs = append(rf.logs, cmd)
+
+	rf.logs.append(cmd)
 	rf.persist()
-	LOG(rf.me, rf.curTerm, DLeader, "Leader accept log [%d]T%d", cmd.Id, cmd.Term)
+	LOG(rf.me, rf.curTerm, DLeader, "Leader accept log [%d]T%d, %v", cmd.Id, cmd.Term, cmd)
 
 	return  cmd.Id , cmd.Term, true
 }
@@ -233,7 +235,7 @@ func (rf *Raft)becomeLeader() {
 	//如果不行则往前缩; 悲观下，最开始是匹配的。
 	//Matchindex 设置为0，leader上台后，不清楚和谁匹配多少。
 	for i := 0; i < len(rf.next); i++ {
-		rf.next[i] = len(rf.logs)
+		rf.next[i] = rf.logs.size()
 		rf.match[i] = 0
 	}
 
@@ -252,9 +254,9 @@ func (rf *Raft) FirstIndexOfTerm(term int) int {
 	//}
 	//return id+1
 
-	for i, entry := range rf.logs {
+	for i, entry := range rf.logs.tailLog {
 		if entry.Term == term {
-			return i
+			return i + rf.logs.lastIncludeIndex
 		} else if entry.Term > term {
 			break
 		}
@@ -284,7 +286,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.role = Follower
 	rf.votedFor = -1
 
-	rf.logs = append(rf.logs, Entry{}) //[0]位置 空的日志，避免一些边界判断.
+	rf.logs = NewLog(InvalidIndex, InvalidTerm, nil, nil)
+	//rf.logs.append(Entry{})
+	//rf.logs = append(rf.logs, Entry{}) //[0]位置 空的日志，避免一些边界判断.
 	rf.next = make([]int, len(rf.peers))
 	rf.match = make([]int, len(rf.peers))
 

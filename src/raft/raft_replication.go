@@ -77,17 +77,17 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	}()
 
 	// 如果 args 的preId 大于本日志 len， 则返回false。 ;
-	if args.PreLogId >= len(rf.logs) {
-		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreLogId:%d >= len me log %d ", args.LeaderId, args.PreLogId, len(rf.logs)-1)
+	if args.PreLogId >= rf.logs.size() {
+		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreLogId:%d >= len me log %d ", args.LeaderId, args.PreLogId, rf.logs.size()-1)
 		reply.ConflictTerm = InvalidTerm
-		reply.ConflictId = len(rf.logs)
+		reply.ConflictId = rf.logs.size()
 		return
 	}
 
 	// 如果 args.preTerm != rf.logs[preId].term,  return false
-	if args.PreTerm != rf.logs[args.PreLogId].Term {
-		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreTerm:%d !=  me term %d ", args.LeaderId, args.PreTerm, rf.logs[args.PreLogId].Term)
-		conflictTerm := rf.logs[args.PreLogId].Term
+	if args.PreTerm != rf.logs.at(args.PreLogId).Term {
+		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreTerm:%d !=  me term %d ", args.LeaderId, args.PreTerm, rf.logs.at(args.PreLogId).Term)
+		conflictTerm := rf.logs.at(args.PreLogId).Term
 		firstId := rf.FirstIndexOfTerm(conflictTerm)
 		reply.ConflictTerm = conflictTerm
 		reply.ConflictId = firstId
@@ -95,7 +95,10 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 	}
 
 	// append 日志， append(rf.logs[args.preid+1], args. logs) , err
-	rf.logs = append(rf.logs[:args.PreLogId+1], append([]Entry{}, args.Logs...)...)
+
+	//rf.logs = append(rf.logs[:args.PreLogId+1], append([]Entry{}, args.Logs...)...)
+	rf.logs.appendFrom(args.PreLogId, args.Logs)
+
 	rf.persist()
 	// todo()：handle leader commit
 	// 如果args 的commited index 大于 commited index， 则执行操作
@@ -105,8 +108,8 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 		rf.committedId = args.LeaderCommittedId
 
 		// 如果 commited index大于本地最大日志索引，则设置commited index
-		if rf.committedId > len(rf.logs)-1 {
-			rf.committedId = len(rf.logs)-1
+		if rf.committedId > rf.logs.size()-1 {
+			rf.committedId = rf.logs.size()-1
 		}
 
 		// 给   applyCond 发送信号
@@ -191,7 +194,8 @@ func (rf *Raft)startReplica(term int) bool {
 			rf.next[peer] = Mmin(rf.next[peer], preNext)
 
 			//LOG(rf.me, rf.curTerm, DLog, "Log id not match for %d, update for %d ", args.PreTerm, rf.next[peer])
-			LOG(rf.me, rf.curTerm, DLog, "-> S%d, Not matched at Prev=[%d]T%d, Try next Prev=[%d]T%d", peer, args.PreLogId, rf.logs[args.PreLogId].Term, rf.next[peer]-1, rf.logs[rf.next[peer]-1].Term)
+			LOG(rf.me, rf.curTerm, DLog, "-> S%d, Not matched at Prev=[%d]T%d, Try next Prev=[%d]T%d",
+				peer, args.PreLogId, rf.logs.at(args.PreLogId).Term, rf.next[peer]-1, rf.logs.at(rf.next[peer]-1).Term)
 			LOG(rf.me, rf.curTerm, DDebug, "Leader log=%v", rf.logString())
 
 			return
@@ -203,7 +207,7 @@ func (rf *Raft)startReplica(term int) bool {
 
 		//5 todo： 更新 commitindex。
 		mjId := rf.getMaxMajorIndex()
-		if mjId > rf.committedId && rf.logs[mjId].Term == rf.curTerm{ // figuer 8
+		if mjId > rf.committedId && rf.logs.at(mjId).Term == rf.curTerm{ // figuer 8
 			LOG(rf.me, rf.curTerm, DApply, "Leader update the commit index %d->%d", rf.committedId, mjId)
 
 			rf.committedId = mjId
@@ -224,23 +228,24 @@ func (rf *Raft)startReplica(term int) bool {
 	for i := 0; i < len(rf.peers); i++ {
 		if i == rf.me {
 			//1 对于自己的这个peer， 需要设置 next 和 match数组； 因为commit的时候会用到；意思是日志复制到自己了。
-			rf.next[rf.me] = len(rf.logs)
-			rf.match[rf.me] = len(rf.logs)-1
+			rf.next[rf.me] = rf.logs.size()
+			rf.match[rf.me] = rf.logs.size()-1
 			continue
 		}
 
 		preId := rf.next[i] - 1
-		preTerm := rf.logs[preId].Term
+		preTerm := rf.logs.at(preId).Term
 		args := &RequestReplicaArgs{
-			LeaderId: i,
+			LeaderId: rf.me,
 			LeaderTerm: rf.curTerm,
 			//2 对于其他peer，则构造试探匹配点； preid， preterm， 发送 entrys
 			PreTerm: preTerm,
 			PreLogId: preId,
-			Logs: append([]Entry{}, rf.logs[preId+1:]...),
+			//Logs: append([]Entry{}, rf.logs[preId+1:]...),
+			Logs: append([]Entry{}, rf.logs.tailsLogs(preId+1)...),
 			LeaderCommittedId: rf.committedId,
 		}
-		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Append, %v", i, args.String())
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Send, %v", i, args.String())
 		go replicaToPeer(i, args) // 这里要开启线程执行发送, 具体的发送成功或失败，我不管
 	}
 	// 否则返回成功
