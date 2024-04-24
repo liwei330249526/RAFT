@@ -84,9 +84,17 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 		return
 	}
 
+	// 如果 prelogId 小于快照的界限
+	if args.PreLogId < rf.logs.lastIncludeIndex {
+		reply.ConflictTerm = rf.logs.lastIncludeTerm
+		reply.ConflictId = rf.logs.lastIncludeIndex
+		LOG(rf.me, rf.curTerm, DLog2, "<- S%d, Reject log, Follower log truncated in %d", args.LeaderId, rf.logs.lastIncludeIndex)
+		return
+	}
+
 	// 如果 args.preTerm != rf.logs[preId].term,  return false
 	if args.PreTerm != rf.logs.at(args.PreLogId).Term {
-		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, PreTerm:%d !=  me term %d ", args.LeaderId, args.PreTerm, rf.logs.at(args.PreLogId).Term)
+		LOG(rf.me, rf.curTerm, DLog, "Reject S%d log, arg PreTerm:%d !=  me preTerm %d ", args.LeaderId, args.PreTerm, rf.logs.at(args.PreLogId).Term)
 		conflictTerm := rf.logs.at(args.PreLogId).Term
 		firstId := rf.FirstIndexOfTerm(conflictTerm)
 		reply.ConflictTerm = conflictTerm
@@ -108,9 +116,9 @@ func (rf *Raft) AppendEntries(args *RequestReplicaArgs, reply *RequestReplicaRep
 		rf.committedId = args.LeaderCommittedId
 
 		// 如果 commited index大于本地最大日志索引，则设置commited index
-		if rf.committedId > rf.logs.size()-1 {
-			rf.committedId = rf.logs.size()-1
-		}
+		//if rf.committedId > rf.logs.size()-1 {
+		//	rf.committedId = rf.logs.size()-1
+		//}
 
 		// 给   applyCond 发送信号
 		rf.applyCond.Signal()
@@ -137,7 +145,7 @@ func (rf *Raft)startReplica(term int) bool {
 			LOG(rf.me, rf.curTerm, DLog, "->S%d, Lost", peer)
 			return
 		}
-		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Append, Reply=%v", peer, resp.String())
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Appended, Reply=%v", peer, resp.String())
 
 		//rf.mu.Lock()
 		//defer rf.mu.Unlock() // 必须加锁 --race 检测
@@ -193,9 +201,16 @@ func (rf *Raft)startReplica(term int) bool {
 			// 强制 next[peer] 单调递减
 			rf.next[peer] = Mmin(rf.next[peer], preNext)
 
+			// 如果preId 是再快照里面的，则 preTerm 为invalid
+			nextPreId := rf.next[peer]-1
+			nextPreTerm := InvalidTerm
+			if nextPreId >= rf.logs.lastIncludeIndex {
+				nextPreTerm = rf.logs.at(nextPreId).Term
+			}
+
 			//LOG(rf.me, rf.curTerm, DLog, "Log id not match for %d, update for %d ", args.PreTerm, rf.next[peer])
 			LOG(rf.me, rf.curTerm, DLog, "-> S%d, Not matched at Prev=[%d]T%d, Try next Prev=[%d]T%d",
-				peer, args.PreLogId, rf.logs.at(args.PreLogId).Term, rf.next[peer]-1, rf.logs.at(rf.next[peer]-1).Term)
+				peer, args.PreLogId, rf.logs.at(args.PreLogId).Term, nextPreId, nextPreTerm)
 			LOG(rf.me, rf.curTerm, DDebug, "Leader log=%v", rf.logString())
 
 			return
@@ -234,6 +249,22 @@ func (rf *Raft)startReplica(term int) bool {
 		}
 
 		preId := rf.next[i] - 1
+
+		// 可能发送 snap， 则跳过 sendlog
+		if preId < rf.logs.lastIncludeIndex {
+			req := &InstallSnapshotArgs{
+				Term: rf.curTerm,
+				LeaderId: rf.me,
+				LastIncludeIndex : rf.logs.lastIncludeIndex,
+				LastIncludeTerm: rf.logs.lastIncludeTerm,
+				Snapshot : rf.logs.snapshot,
+			}
+			LOG(rf.me, rf.curTerm, DSnap, "-> S%d, Send snapshot, %v", i, req.String())
+			go rf.replicaSnapshotToPeer(i, term, req)
+
+			continue
+		}
+
 		preTerm := rf.logs.at(preId).Term
 		args := &RequestReplicaArgs{
 			LeaderId: rf.me,
@@ -245,7 +276,7 @@ func (rf *Raft)startReplica(term int) bool {
 			Logs: append([]Entry{}, rf.logs.tailsLogs(preId+1)...),
 			LeaderCommittedId: rf.committedId,
 		}
-		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Send, %v", i, args.String())
+		LOG(rf.me, rf.curTerm, DDebug, "-> S%d, Send logs, %v", i, args.String())
 		go replicaToPeer(i, args) // 这里要开启线程执行发送, 具体的发送成功或失败，我不管
 	}
 	// 否则返回成功

@@ -179,14 +179,15 @@ func (rf *Raft) starElection(term int) bool {
 		LOG(rf.me, rf.curTerm,DError, "me role %v or term %d change", rf.role, rf.curTerm)
 		return false
 	}
+
+	lastId := rf.logs.size()-1 // todo: recode bug2 要用相同的 lastId 和 lastTerm 去请求投票
+	lastTerm := rf.logs.at(lastId).Term
+
 	for i := 0; i < len(rf.peers); i++ {
 		if i == rf.me {
 			voted++
 			continue
 		}
-
-		lastId := rf.logs.size()-1
-		lastTerm := rf.logs.at(lastId).Term
 		req := &RequestVoteArgs{
 			CandidateTerm: rf.curTerm,
 			CandidateId:   rf.me,

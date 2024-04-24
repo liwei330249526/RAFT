@@ -30,7 +30,7 @@ func (rf *Raft) persist() {
 	rf.logs.persist(e)
 	//e.Encode(rf.logs)
 	raftState := w.Bytes()
-	rf.persister.Save(raftState, nil)
+	rf.persister.Save(raftState, rf.logs.snapshot)
 }
 
 // restore previously persisted state.
@@ -67,5 +67,13 @@ func (rf *Raft) readPersist(data []byte) {
 	  rf.votedFor = votedFor
 	  //rf.logs= logs
 	}
+	rf.logs.snapshot = rf.persister.ReadSnapshot()
+
+	// 重启后，会推高 commited 和 lastapply index
+	if rf.committedId < rf.logs.lastIncludeIndex {
+		rf.committedId = rf.logs.lastIncludeIndex
+		rf.lastApplyedId = rf.committedId
+	}
+
 	return
 }

@@ -53,7 +53,7 @@ func (rf *Raft) logString() string {
 			preStart = i + rf.logs.lastIncludeIndex
 		}
 	}
-	ret += fmt.Sprintf("[%d - %d]%dT",preStart, len(rf.logs.tailLog) + rf.logs.lastIncludeIndex, preTerm)
+	ret += fmt.Sprintf("[%d - %d]T%d",preStart, len(rf.logs.tailLog) + rf.logs.lastIncludeIndex, preTerm)
 	return ret
 }
 
@@ -76,6 +76,15 @@ type ApplyMsg struct {
 	Snapshot      []byte
 	SnapshotTerm  int
 	SnapshotIndex int
+}
+
+func (a ApplyMsg)String() string {
+	if a.CommandValid {
+		return fmt.Sprintf(" apply log %d, %v",a.CommandIndex, a.Command)
+
+	} else {
+		return fmt.Sprintf(" apply snapshot %d %d", a.SnapshotIndex, a.SnapshotTerm)
+	}
 }
 
 // A Go object implementing a single Raft peer.
@@ -104,6 +113,7 @@ type Raft struct {
 	committedId int // 已提交的日志index
 	applyCh chan ApplyMsg
 	applyCond *sync.Cond
+	snapPend bool // 正在应用日志，优先应用日志
 }
 
 // return currentTerm and whether this server
@@ -115,32 +125,6 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.curTerm, rf.role == Leader
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (PartD).
-	//加锁
-	//if index <= lastIncludeIndex   || index > commitedId, err
-	//	lastIncludeIndex， lastIncludeTerm 赋值
-	//snapshot 赋值
-	//newLog 赋值[0] ， lastIncludeTerm
-	//newLog 赋值[1:]， idx+1: 截断日志
-	//persist()
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if index <= rf.logs.lastIncludeIndex || index > rf.committedId {
-		LOG(rf.me, rf.curTerm, DSnap, "Can't snapshot, index out (%d - %d]", rf.logs.lastIncludeIndex, rf.committedId)
-		return
-	}
-	rf.logs.doSnapshot(index, snapshot)
-	rf.persist()
-	return
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -313,6 +297,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.committedId = 0
 	rf.applyCh = applyCh
 	rf.applyCond = sync.NewCond(&rf.mu)
+	rf.snapPend = false
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
