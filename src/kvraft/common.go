@@ -1,10 +1,25 @@
 package kvraft
 
+import "time"
+
 const (
-	OK             = "OK"
+	OK             = "OK" // 无错误
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongLeader = "ErrWrongLeader"
+	ErrTimeOut     = "ErrTimeOut"
+	ErrKeyNotExist = "ErrKeyNotExist"
+	ErrSeqDuplica = "ErrSeqDuplica"
 )
+
+
+var RaftTypeGet CmdType = "RaftTypeGet"
+var RaftTypePut CmdType = "RaftTypePut"
+var RaftTypeAppend CmdType = "RaftTypeAppend"
+
+const (
+	TimeOut = time.Millisecond * 500
+)
+
 
 type Err string
 
@@ -16,6 +31,9 @@ type PutAppendArgs struct {
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+
+	ClientId int
+	SeqId int
 }
 
 type PutAppendReply struct {
@@ -30,4 +48,25 @@ type GetArgs struct {
 type GetReply struct {
 	Err   Err
 	Value string
+}
+
+type CmdType string
+
+
+type Op struct { // todo: 字段定义
+	CmdType CmdType
+	Key string
+	Val string
+	ClientId int
+	SeqId int
+}
+
+type RaftCommandResp struct { // todo : 字段定义
+	Val string
+	Err Err // 有可能有错误，或nil
+}
+
+type LastRaftCommandResp struct {
+	SeqId int
+	rc RaftCommandResp
 }
