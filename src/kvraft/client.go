@@ -1,6 +1,8 @@
 package kvraft
 
-import "course/labrpc"
+import (
+	"course/labrpc"
+)
 import "crypto/rand"
 import "math/big"
 
@@ -46,6 +48,7 @@ func (ck *Clerk) Get(key string) string {
 	// 从leaderId 开始远程调用 call
 	// 如果获取失败，则尝试下一个节点，轮询获取, 问题，如果一直获取不到怎么办?
 	// 获取失败的3个条件， !ok, 不是leader， server 返回超时
+	// get 方法是不影响状态机的，不需要去重逻辑的
 	for {
 		args := GetArgs{
 			Key:key,
@@ -54,8 +57,10 @@ func (ck *Clerk) Get(key string) string {
 		ok := ck.servers[ck.leaderId].Call("KVServer.Get", &args, &reply)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeOut {
 			ck.leaderId = (ck.leaderId+1) % len(ck.servers)
+			//fmt.Printf("client %d, Get err %s\n", ck.clientId, reply.Err)
 			continue
 		}
+		//fmt.Printf("client %d, Get val %s\n", ck.clientId, reply.Value)
 		return reply.Value
 	}
 }
@@ -74,6 +79,8 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// 从leaderId 开始远程调用 call
 	// 如果获取失败，则尝试下一个节点，轮询调用
 	// 从leaderId开始远程调用，发送req， 成功后，设置 seqId++
+	// 去重逻辑在putappend方法中
+	//fmt.Printf("client %d, PutAppend key:%s, val:%s , seq:%d\n ", ck.clientId, key, value, ck.seqId)
 	for {
 		args := PutAppendArgs{
 			Key:key,
@@ -86,9 +93,11 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		ok := ck.servers[ck.leaderId].Call("KVServer.PutAppend", &args, &reply)
 		if !ok || reply.Err == ErrWrongLeader || reply.Err == ErrTimeOut {
 			ck.leaderId = (ck.leaderId+1) % len(ck.servers)
+			//fmt.Printf("client %d, PutAppend err %s\n", ck.clientId, reply.Err)
 			continue
 		}
-		ck.seqId++
+		ck.seqId++ // 下一个请求的时候， seq 要递增一个
+
 		return
 	}
 }

@@ -1,9 +1,11 @@
 package kvraft
 
 import (
+	"bytes"
 	"course/labgob"
 	"course/labrpc"
 	"course/raft"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -21,14 +23,17 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 func (s *StateMachine)Apply(rc Op) RaftCommandResp {
 	res := RaftCommandResp{}
-	if rc.CmdType == RaftTypeGet {
+	if rc.CmdType == CmdTypeGet {
 		val, err := s.Get(rc.Key)
+		//fmt.Printf("get op is key:%s, val:%s, clientId: %d, seqId: %d\n", rc.Key, val, rc.ClientId, rc.SeqId)
 		res.Val = val
 		res.Err = err
-	} else if rc.CmdType == RaftTypePut {
+	} else if rc.CmdType == CmdTypePut {
 		err := s.Put(rc.Key, rc.Val)
+		//fmt.Printf("put op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
 		res.Err = err
-	} else if rc.CmdType == RaftTypeAppend {
+	} else if rc.CmdType == CmdTypeAppend {
+		//fmt.Printf("append op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
 		err := s.Append(rc.Key, rc.Val)
 		res.Err = err
 	}
@@ -60,7 +65,8 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// 根据raft.start 的返回结果，如果不是leader， 则返回错误 ErrWrongLeader
 	// 根据raft.start 的返回结果的index， lock， unlock 通过一个 chan 获取执行结果；
 	// 带超时的 select 机制， time.After()
-	index, _, isLeader := kv.rf.Start(Op{CmdType: RaftTypeGet, Key: args.Key})
+	//fmt.Printf("server %d, Get start \n", kv.me)
+	index, _, isLeader := kv.rf.Start(Op{CmdType: CmdTypeGet, Key: args.Key})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 		return
@@ -82,11 +88,9 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	case result := <- notifyCh:
 		reply.Value = result.Val
 		reply.Err = result.Err
-		return
 
 	case <-time.After(TimeOut):
 		reply.Err = ErrTimeOut
-		return
 	}
 	return
 }
@@ -99,18 +103,21 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// 根据raft.start 的返回结果，如果不是leader， 则返回错误 ErrWrongLeader
 	// 根据raft.start 的返回结果的index， lock， unlock 通过一个 chan 获取执行结果；
 	// 带超时的 select 机制， time.After()
-
+	//fmt.Printf("KVServer %d, PutAppend start, key %s, val %s \n", kv.me, args.Key, args.Value)
+	kv.mu.Lock()
 	if kv.isRaftCommandDuplicate(args.ClientId, args.SeqId) {
-		reply.Err = kv.duplicateReqM[args.ClientId].rc.Err
+		reply.Err = kv.duplicateReqM[args.ClientId].Rc.Err
+		kv.mu.Unlock()
 		return
 	}
+	kv.mu.Unlock()
 
 	index, _, isLeader := kv.rf.Start(Op{
-		CmdType:RaftTypePut,
-		Key: args.Key,
-		Val: args.Value,
+		CmdType:  getTypeByReq(args.Op) ,
+		Key:      args.Key,
+		Val:      args.Value,
 		ClientId: args.ClientId,
-		SeqId: args.SeqId,
+		SeqId:    args.SeqId,
 	})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
@@ -142,6 +149,19 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// 删除 index 对应的 chan
 }
 
+func getTypeByReq(op string) CmdType {
+	switch op {
+	case "Put":
+		return CmdTypePut
+	case "Append":
+		return CmdTypeAppend
+
+	default:
+		//panic(fmt.Sprintf("err op type %s", op))
+		panic(fmt.Sprintf("err op type %s", op))
+	}
+}
+
 // the tester calls Kill() when a KVServer instance won't
 // be needed again. for your convenience, we supply
 // code to set rf.dead (without needing a lock),
@@ -163,7 +183,7 @@ func (kv *KVServer) killed() bool {
 
 func (kv *KVServer) getNotifyChanel(index int) chan RaftCommandResp {
 	if _, ok := kv.notifyChs[index]; !ok {
-		kv.notifyChs[index] = make(chan RaftCommandResp)
+		kv.notifyChs[index] = make(chan RaftCommandResp, 1) // todo bug:
 	}
 	return kv.notifyChs[index]
 }
@@ -197,11 +217,16 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	kv.dead = 0
+	kv.lastAppliedId = 0
 
 	kv.stateMachine = NewStateMachine()
 	kv.notifyChs = make(map[int]chan RaftCommandResp)
 	kv.duplicateReqM = make(map[int]LastRaftCommandResp)
 	// You may need initialization code here.
+
+	// 启动的时候，需要从snapshot 恢复数据到状态机
+	kv.restoreSnapshot(persister.ReadSnapshot())
 
 	go kv.applyKvRaftTask()
 	return kv
@@ -220,27 +245,42 @@ func (kv *KVServer)applyKvRaftTask() {
 		case message := <- kv.applyCh: // 从applyCh 获取待应用的 rafft 日志
 			if message.CommandValid {
 				kv.mu.Lock()
-				if message.CommandIndex < kv.lastAppliedId {
+				if message.CommandIndex <= kv.lastAppliedId { // todo bug:   kv.lastAppliedId <= message.CommandIndex
 					kv.mu.Unlock()
 					continue
 				}
+				kv.lastAppliedId = message.CommandIndex
+				// 用户的操作
 				rc := message.Command.(Op)
 
-				if rc.CmdType != RaftTypeGet && kv.isRaftCommandDuplicate(rc.ClientId, rc.SeqId) {
-					result = kv.duplicateReqM[rc.ClientId].rc
+				if rc.CmdType != CmdTypeGet && kv.isRaftCommandDuplicate(rc.ClientId, rc.SeqId) {
+					result = kv.duplicateReqM[rc.ClientId].Rc
 				} else {
+					//fmt.Printf("who: %d apply: %v op is key:%s, val:%s, clientId: %d, seqId: %d\n",kv.me,rc.CmdType, rc.Key, rc.Val, rc.ClientId, rc.SeqId)
 					result = kv.stateMachine.Apply(rc)
-					if rc.CmdType != RaftTypeGet {
+					if rc.CmdType != CmdTypeGet {
 						kv.duplicateReqM[rc.ClientId] = LastRaftCommandResp{rc.SeqId,result}
 					}
 				}
 				// 判断如果是leader， 则通过 notifyChanle 将结果返回客户端
-				if _, isLeader := kv.rf.GetState(); isLeader {
+				if _, isLeader := kv.rf.GetState(); isLeader { // get 一直没等到，返回了也 delete 了chan， 然后这里应用了，chan一直等待
 					notifyCh := kv.getNotifyChanel(message.CommandIndex)
 
 					notifyCh <- result
 				}
 
+				// 如果需要快照，则创建快照
+				if kv.maxraftstate != -1 && kv.rf.GetRaftStateSize() >= kv.maxraftstate {
+					kv.MakeSnapshot(message.CommandIndex)
+				}
+
+				kv.mu.Unlock()
+			} else if message.SnapshotValid {
+				// snapshot 恢复
+				kv.mu.Lock()
+
+				kv.restoreSnapshot(message.Snapshot)
+				kv.lastAppliedId = message.SnapshotIndex // 因为 SnapshotIndex之前的数据都在 snapshot中都用到了状态机
 				kv.mu.Unlock()
 			}
 		}
@@ -252,8 +292,42 @@ func (kv *KVServer) isRaftCommandDuplicate(clientId int, seqId int) bool {
 	// 如果client 对应的 LastRaftCommandResp 存在，且seqId小于或等于缓存的 LastRaftCommandResp 的seqId，
 	// 则认为是重复的请求
 	lastInfo, ok := kv.duplicateReqM[clientId]
-	if ok && lastInfo.SeqId <= seqId {
+	//if ok && lastInfo.SeqId <= seqId { // todo bug
+	if ok &&  seqId <= lastInfo.SeqId { // todo bug
 		return true
 	}
 	return false
+}
+
+// 现在状态机应用到了 index 的位置， 对index以下做快照（包括index）。
+func (kv *KVServer) MakeSnapshot(index int) {
+	buf := new(bytes.Buffer) // 往这里写
+	e := labgob.NewEncoder(buf)
+	e.Encode(kv.stateMachine)
+	e.Encode(kv.duplicateReqM)
+	kv.rf.Snapshot(index, buf.Bytes())
+	return
+}
+
+func (kv *KVServer) restoreSnapshot(snapshot []byte) {
+	if len(snapshot) == 0 {
+		return
+	}
+
+	bf := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(bf)
+	var stateMachine StateMachine
+	var duplicateReqM map[int]LastRaftCommandResp
+	err := d.Decode(&stateMachine)
+	if err != nil {
+		panic( fmt.Sprintf("decode stateMachine err %s", err))
+	}
+	err = d.Decode(&duplicateReqM)
+	if err != nil {
+		panic( fmt.Sprintf("decode duplicateReqM err %s", err))
+	}
+
+	kv.stateMachine = &stateMachine
+	kv.duplicateReqM = duplicateReqM
+	return
 }

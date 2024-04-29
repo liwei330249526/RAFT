@@ -2,6 +2,8 @@ package kvraft
 
 import "time"
 
+
+// 返回值敞亮
 const (
 	OK             = "OK" // 无错误
 	ErrNoKey       = "ErrNoKey"
@@ -11,10 +13,13 @@ const (
 	ErrSeqDuplica = "ErrSeqDuplica"
 )
 
-
-var RaftTypeGet CmdType = "RaftTypeGet"
-var RaftTypePut CmdType = "RaftTypePut"
-var RaftTypeAppend CmdType = "RaftTypeAppend"
+// cmd 类型
+type CmdType uint32
+const (
+	CmdTypeGet CmdType = iota
+	CmdTypePut
+	CmdTypeAppend
+)
 
 const (
 	TimeOut = time.Millisecond * 500
@@ -50,9 +55,6 @@ type GetReply struct {
 	Value string
 }
 
-type CmdType string
-
-
 type Op struct { // todo: 字段定义
 	CmdType CmdType
 	Key string
@@ -68,5 +70,5 @@ type RaftCommandResp struct { // todo : 字段定义
 
 type LastRaftCommandResp struct {
 	SeqId int
-	rc RaftCommandResp
+	Rc    RaftCommandResp
 }

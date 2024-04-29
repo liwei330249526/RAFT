@@ -27,6 +27,19 @@ import (
 	"course/labrpc"
 )
 
+const (
+	electionTimeoutMin time.Duration = 250 * time.Millisecond
+	electionTimeoutMax time.Duration = 400 * time.Millisecond
+
+	//replicateInterval time.Duration = 70 * time.Millisecond
+	replicateInterval time.Duration = 30 * time.Millisecond
+)
+
+const (
+	InvalidTerm  int = 0
+	InvalidIndex int = 0
+)
+
 type Role string
 
 // 定义 raft 3 种角色
@@ -125,6 +138,10 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.curTerm, rf.role == Leader
+}
+
+func (rf *Raft) GetRaftStateSize() int {
+	return rf.persister.RaftStateSize()
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
