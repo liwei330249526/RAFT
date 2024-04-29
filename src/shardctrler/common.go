@@ -1,5 +1,7 @@
 package shardctrler
 
+import "time"
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -30,6 +32,19 @@ const (
 	ErrSeqDuplica = "ErrSeqDuplica"
 )
 
+type CmdType uint32
+const (
+	CmdTypeJoin CmdType = iota
+	CmdTypeLeave
+	CmdTypeMove
+	CmdTypeQuery
+)
+
+const (
+	TimeOut = time.Millisecond * 500
+)
+
+
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
 type Config struct {
@@ -41,41 +56,64 @@ type Config struct {
 type Err string
 
 type JoinArgs struct {
+	ClientId int
+	SeqId int
 	Servers map[int][]string // new GID -> servers mappings
 }
 
 type JoinReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type LeaveArgs struct {
+	ClientId int
+	SeqId int
 	GIDs []int
 }
 
 type LeaveReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type MoveArgs struct {
+	ClientId int
+	SeqId int
 	Shard int
 	GID   int
 }
 
 type MoveReply struct {
-	WrongLeader bool
 	Err         Err
 }
 
 type QueryArgs struct {
 	Num int // desired config number
+}
+
+type QueryReply struct {
+	Err         Err
+	Config      Config
+}
+
+
+type Op struct { // todo: 字段定义
+	CmdType CmdType
+	Servers map[int][]string // for join new GID -> servers mapping
+	GIDs []int  // for leave
+	Shard int   // for move
+	GID   int   // for move
+
+	Num int     // for query
 	ClientId int
 	SeqId int
 }
 
-type QueryReply struct {
-	WrongLeader bool
-	Err         Err
-	Config      Config
+type RaftCommandResp struct { // todo : 字段定义
+	Config      Config // for query
+	Err Err // 有可能有错误，或nil
+}
+
+type LastRaftCommandResp struct {
+	SeqId int
+	Rc    RaftCommandResp
 }

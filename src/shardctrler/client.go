@@ -8,6 +8,9 @@ import "course/labrpc"
 import "time"
 import "crypto/rand"
 import "math/big"
+// 和kv raft 相似，但 kvraft 是接受用户put get append 等请求，
+// chardclrler 是接受客户端配置， query, join, leave, move 等请求
+
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -35,8 +38,6 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{
 		Num:num,
-		ClientId: ck.clientId,
-		SeqId: ck.seqId,
 	}
 	// Your code here.
 	//args.Num = num
