@@ -21,25 +21,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-func (s *StateMachine)Apply(rc Op) RaftCommandResp {
-	res := RaftCommandResp{}
-	if rc.CmdType == CmdTypeGet {
-		val, err := s.Get(rc.Key)
-		//fmt.Printf("get op is key:%s, val:%s, clientId: %d, seqId: %d\n", rc.Key, val, rc.ClientId, rc.SeqId)
-		res.Val = val
-		res.Err = err
-	} else if rc.CmdType == CmdTypePut {
-		err := s.Put(rc.Key, rc.Val)
-		//fmt.Printf("put op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
-		res.Err = err
-	} else if rc.CmdType == CmdTypeAppend {
-		//fmt.Printf("append op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
-		err := s.Append(rc.Key, rc.Val)
-		res.Err = err
-	}
-	return res
-}
-
 type KVServer struct {
 	mu      sync.Mutex
 	me      int

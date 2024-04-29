@@ -20,6 +20,16 @@ package shardctrler
 // The number of shards.
 const NShards = 10
 
+// 返回值敞亮
+const (
+	OK             = "OK" // 无错误
+	ErrNoKey       = "ErrNoKey"
+	ErrWrongLeader = "ErrWrongLeader"
+	ErrTimeOut     = "ErrTimeOut"
+	ErrKeyNotExist = "ErrKeyNotExist"
+	ErrSeqDuplica = "ErrSeqDuplica"
+)
+
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
 type Config struct {
@@ -27,10 +37,6 @@ type Config struct {
 	Shards [NShards]int     // shard -> gid
 	Groups map[int][]string // gid -> servers[]
 }
-
-const (
-	OK = "OK"
-)
 
 type Err string
 
@@ -64,6 +70,8 @@ type MoveReply struct {
 
 type QueryArgs struct {
 	Num int // desired config number
+	ClientId int
+	SeqId int
 }
 
 type QueryReply struct {
