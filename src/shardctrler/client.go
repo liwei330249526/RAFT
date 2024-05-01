@@ -6,7 +6,6 @@ package shardctrler
 
 import (
 	"course/labrpc"
-	"fmt"
 )
 import "time"
 import "crypto/rand"
@@ -49,7 +48,7 @@ func (ck *Clerk) Query(num int) Config {
 		for _, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			fmt.Println("client Query num ", num, reply.Config,reply)
+			//fmt.Println("client Query num ", num, reply.Config,reply)
 			if ok && reply.Err == OK {
 
 				return reply.Config
@@ -72,10 +71,10 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		// try each known server.
 		for _, srv := range ck.servers {
 			var reply JoinReply
-			fmt.Println("client Join servers start", servers)
+			//fmt.Println("client Join servers start", servers)
 			ok := srv.Call("ShardCtrler.Join", args, &reply)
 			if ok && reply.Err == OK {
-				fmt.Println("client Join servers ", servers)
+				//fmt.Println("client Join servers ", servers)
 				ck.seqId++
 				return
 			}
@@ -99,7 +98,7 @@ func (ck *Clerk) Leave(gids []int) {
 			var reply LeaveReply
 			ok := srv.Call("ShardCtrler.Leave", args, &reply)
 			if ok && reply.Err == OK  {
-				fmt.Println("client Leave gids ", gids)
+				//fmt.Println("client Leave gids ", gids)
 				ck.seqId++
 				return
 			}
@@ -125,7 +124,7 @@ func (ck *Clerk) Move(shard int, gid int) {
 			var reply MoveReply
 			ok := srv.Call("ShardCtrler.Move", args, &reply)
 			if ok && reply.Err == OK  {
-				fmt.Println("Move shard gid ", shard, gid)
+				//fmt.Println("Move shard gid ", shard, gid)
 				ck.seqId++
 				return
 			}

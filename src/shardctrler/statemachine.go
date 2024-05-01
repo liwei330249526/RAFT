@@ -27,7 +27,7 @@ func DefaultConfig() Config {
 
 // 查询一个配置
 func (s *StateMachine)Query(num int) Config {
-	fmt.Println("StateMachine Query num, config", num, s.configs)
+	//fmt.Println("StateMachine Query num, config", num, s.configs)
 	if num < 0 || num >= len(s.configs) {
 		return s.configs[len(s.configs)-1]
 	}
@@ -151,7 +151,7 @@ func getMinShardGid(gidToShards map[int][]int) int {
 	sort.Ints(gids)
 
 	mGid := -1
-	mCount := math.MaxInt
+	mCount := math.MaxInt32
 	for _, gid := range gids{
 		if gid != 0 && mCount > len(gidToShards[gid]){
 			mCount = len(gidToShards[gid])

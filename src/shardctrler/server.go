@@ -2,7 +2,6 @@ package shardctrler
 
 import (
 	"course/raft"
-	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -31,14 +30,14 @@ type ShardCtrler struct {
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
 	var resp RaftCommandResp
-	fmt.Println("server Join  start ", args.Servers)
+	//fmt.Println("server Join  start ", args.Servers)
 	sc.OpCommon(&Op{
 		CmdType: CmdTypeJoin,
 		ClientId: args.ClientId,
 		SeqId: args.SeqId,
 		Servers: args.Servers,
 	}, &resp)
-	fmt.Println("server Join ", args.Servers, resp.Err)
+	//fmt.Println("server Join ", args.Servers, resp.Err)
 	reply.Err = resp.Err
 	return
 }
@@ -46,14 +45,14 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	// Your code here.
 	var resp RaftCommandResp
-	fmt.Println("server Leave start ", args.GIDs)
+	//fmt.Println("server Leave start ", args.GIDs)
 	sc.OpCommon(&Op{
 		CmdType: CmdTypeLeave,
 		ClientId: args.ClientId,
 		SeqId: args.SeqId,
 		GIDs: args.GIDs,
 	}, &resp)
-	fmt.Println("server Leave ", args.GIDs, resp.Err)
+	//fmt.Println("server Leave ", args.GIDs, resp.Err)
 	reply.Err = resp.Err
 	return
 }
@@ -61,7 +60,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
 	var resp RaftCommandResp
-	fmt.Println("server Move ", args.Shard, args.GID)
+	//fmt.Println("server Move ", args.Shard, args.GID)
 	sc.OpCommon(&Op{
 		CmdType: CmdTypeMove,
 		ClientId: args.ClientId,
@@ -69,7 +68,7 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 		Shard: args.Shard,
 		GID:args.GID,
 	}, &resp)
-	fmt.Println("server Move ", args.Shard, args.GID, resp.Err)
+	//fmt.Println("server Move ", args.Shard, args.GID, resp.Err)
 	reply.Err = resp.Err
 	return
 }
