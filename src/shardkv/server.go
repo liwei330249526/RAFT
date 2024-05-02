@@ -26,7 +26,7 @@ type ShardKV struct {
 	notifyChs     map[int]chan RaftCommandResp
 	lastAppliedId int
 
-	stateMachine  *StateMachine
+	stateMachines  map[int]*StateMachine // 每个shard 一个 stateMachine
 	duplicateReqM map[int]LastRaftCommandResp // 某个clinet 的最后一条消息的结果和 seqId
 	dead          int32
 	curConfig     shardctrler.Config
@@ -50,7 +50,11 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	}
 	kv.mu.Unlock()
 
-	index, _, isLeader := kv.rf.Start(Op{CmdType: CmdTypeGet, Key: args.Key})
+	index, _, isLeader := kv.rf.Start(
+		RaftCommand{
+			RcType:ClientCmd,
+			data: Op{CmdType: CmdTypeGet, Key: args.Key},
+		})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 		return
@@ -106,13 +110,17 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 	kv.mu.Unlock()
 
-	index, _, isLeader := kv.rf.Start(Op{
-		CmdType:  getTypeByReq(args.Op) ,
-		Key:      args.Key,
-		Val:      args.Value,
-		ClientId: args.ClientId,
-		SeqId:    args.SeqId,
-	})
+	index, _, isLeader := kv.rf.Start(
+		RaftCommand{
+			RcType:ClientCmd,
+			data: Op{
+				CmdType:  getTypeByReq(args.Op) ,
+				Key:      args.Key,
+				Val:      args.Value,
+				ClientId: args.ClientId,
+				SeqId:    args.SeqId,
+			},
+		})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 		return
@@ -143,7 +151,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// 删除 index 对应的 chan
 }
 
-func getTypeByReq(op string) CmdType {
+func getTypeByReq(op string) OpType {
 	switch op {
 	case "Put":
 		return CmdTypePut
@@ -214,6 +222,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
+	labgob.Register(RaftCommand{})
 
 	kv := new(ShardKV)
 	kv.me = me
@@ -234,7 +243,10 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.dead = 0
 	kv.lastAppliedId = 0
 
-	kv.stateMachine = NewStateMachine()
+	for i := 0; i < shardctrler.NShards; i++ {
+		kv.stateMachines[i] = NewStateMachine()
+	}
+
 	kv.notifyChs = make(map[int]chan RaftCommandResp)
 	kv.duplicateReqM = make(map[int]LastRaftCommandResp)
 	// You may need initialization code here.
@@ -276,17 +288,24 @@ func (kv *ShardKV)applyKvRaftTask() {
 				}
 				kv.lastAppliedId = message.CommandIndex
 				// 用户的操作
-				rc := message.Command.(Op)
-
-				if rc.CmdType != CmdTypeGet && kv.isRaftCommandDuplicate(rc.ClientId, rc.SeqId) {
-					result = kv.duplicateReqM[rc.ClientId].Rc
-				} else {
-					//fmt.Printf("who: %d apply: %v op is key:%s, val:%s, clientId: %d, seqId: %d\n",kv.me,rc.CmdType, rc.Key, rc.Val, rc.ClientId, rc.SeqId)
-					result = kv.stateMachine.Apply(rc)
-					if rc.CmdType != CmdTypeGet {
-						kv.duplicateReqM[rc.ClientId] = LastRaftCommandResp{rc.SeqId,result}
+				rc := message.Command.(RaftCommand)
+				if rc.RcType == ClientCmd {
+					op := rc.data.(Op)
+					if op.CmdType != CmdTypeGet && kv.isRaftCommandDuplicate(op.ClientId, op.SeqId) {
+						result = kv.duplicateReqM[op.ClientId].Rc
+					} else {
+						//fmt.Printf("who: %d apply: %v op is key:%s, val:%s, clientId: %d, seqId: %d\n",kv.me,rc.CmdType, rc.Key, rc.Val, rc.ClientId, rc.SeqId)
+						shardId := key2shard(op.Key) // shard
+						result = kv.stateMachines[shardId].Apply(op)
+						if op.CmdType != CmdTypeGet {
+							kv.duplicateReqM[op.ClientId] = LastRaftCommandResp{op.SeqId,result}
+						}
 					}
+				} else {
+					result = kv.handleConfig(rc)
 				}
+
+
 				// 判断如果是leader， 则通过 notifyChanle 将结果返回客户端
 				if _, isLeader := kv.rf.GetState(); isLeader { // get 一直没等到，返回了也 delete 了chan， 然后这里应用了，chan一直等待
 					notifyCh := kv.getNotifyChanel(message.CommandIndex)
@@ -328,7 +347,7 @@ func (kv *ShardKV) isRaftCommandDuplicate(clientId int, seqId int) bool {
 func (kv *ShardKV) MakeSnapshot(index int) {
 	buf := new(bytes.Buffer) // 往这里写
 	e := labgob.NewEncoder(buf)
-	e.Encode(kv.stateMachine)
+	e.Encode(kv.stateMachines)
 	e.Encode(kv.duplicateReqM)
 	kv.rf.Snapshot(index, buf.Bytes())
 	return
@@ -341,8 +360,9 @@ func (kv *ShardKV) restoreSnapshot(snapshot []byte) {
 
 	bf := bytes.NewBuffer(snapshot)
 	d := labgob.NewDecoder(bf)
-	var stateMachine StateMachine
+	stateMachine := make(map[int]*StateMachine)
 	var duplicateReqM map[int]LastRaftCommandResp
+
 	err := d.Decode(&stateMachine)
 	if err != nil {
 		panic( fmt.Sprintf("decode stateMachine err %s", err))
@@ -352,18 +372,95 @@ func (kv *ShardKV) restoreSnapshot(snapshot []byte) {
 		panic( fmt.Sprintf("decode duplicateReqM err %s", err))
 	}
 
-	kv.stateMachine = &stateMachine
+	kv.stateMachines = stateMachine
 	kv.duplicateReqM = duplicateReqM
 	return
 }
 
 func (kv *ShardKV) getConfig() {
+	// 这里每个节点都会各自查询config 到自己节点；
+	// 应该改为， 查到新的后，交给raft 模块处理， 日志应用后，说明3个 replica 都共识了 config 变更
+	// 日志应用时，每个节点进行 config 变更的实施，config变更，data变更。
 	for !kv.killed() {
 		kv.mu.Lock()
-		config := kv.mck.Query(-1)
-		kv.curConfig = config
+		//config := kv.mck.Query(-1)
+		//kv.curConfig = config
+
+		num := kv.curConfig.Num
+		config := kv.mck.Query(num+1)
+
+		resp := RaftCommandResp{}
+		kv.configChange(RaftCommand{
+			RcType: ConfigChange,
+			data: config,
+		}, &resp)
+
 		kv.mu.Unlock()
 
 		time.Sleep(GetConfigInterval)
 	}
+}
+
+// 处理config 更新
+func (kv *ShardKV) handleConfig(rc RaftCommand) RaftCommandResp {
+	switch rc.RcType {
+	case ConfigChange:
+		newConfig := rc.data.(shardctrler.Config)
+		return kv.handleConfigChange(newConfig)
+	}
+}
+
+func (kv *ShardKV) configChange(command RaftCommand, reply *RaftCommandResp) {
+	index, _, isLeader := kv.rf.Start(command)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		return
+	}
+
+	kv.mu.Lock()
+	notifyCh := kv.getNotifyChanel(index)
+	kv.mu.Unlock()
+
+	defer func() {
+		// 删除 index 对应的 chan
+		kv.mu.Lock()
+		kv.removeNotifyChanel(index)
+		kv.mu.Unlock()
+		return
+	}()
+
+	select {
+	case result := <- notifyCh:
+		//reply.Value = result.val
+		reply.Err = result.Err
+		return
+
+	case <-time.After(TimeOut):
+		reply.Err = ErrTimeOut
+		return
+	}
+}
+
+func (kv *ShardKV) handleConfigChange(newConfig shardctrler.Config) (resp RaftCommandResp) {
+	/*
+	 1 遍历 shards，
+	 1 如果newConfig == gid， config != gid ， 则move int； 迁入， cur.shard 原来别人，不是0； 现在过来
+	 2 如果newConfig != gid， config == gid， 则move out; 迁出， 现在是我，迁出去，迁出目的不是0
+	*/
+	if kv.curConfig.Num + 1 != newConfig.Num {
+		resp.Err = ErrConfigNum
+		return
+	}
+
+	for i := 0; i < shardctrler.NShards; i++ {
+		if kv.curConfig.Shards[i] != kv.gid && newConfig.Shards[i] == kv.gid {
+			// 迁入的shard
+		} else if kv.curConfig.Shards[i] == kv.gid && newConfig.Shards[i] != kv.gid {
+			// 迁出的shard
+		}
+	}
+
+	kv.curConfig = newConfig
+	resp.Err = OK
+	return
 }

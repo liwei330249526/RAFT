@@ -18,6 +18,7 @@ const (
 	ErrWrongLeader = "ErrWrongLeader"
 
 	ErrTimeOut     = "ErrTimeOut"
+	ErrConfigNum   = "ErrConfigNum"
 	ErrKeyNotExist = "ErrKeyNotExist"
 	ErrSeqDuplica = "ErrSeqDuplica"
 )
@@ -59,18 +60,31 @@ type GetReply struct {
 }
 
 // cmd 类型
-type CmdType uint32
+type OpType uint32
 const (
-	CmdTypeGet CmdType = iota
+	CmdTypeGet OpType = iota
 	CmdTypePut
 	CmdTypeAppend
 )
+
+type RaftCommandType uint32
+
+const (
+	ClientCmd RaftCommandType = iota
+	ConfigChange
+)
+
 type Op struct { // todo: 字段定义
-	CmdType CmdType
-	Key string
-	Val string
+	CmdType  OpType
+	Key      string
+	Val      string
 	ClientId int
-	SeqId int
+	SeqId    int
+}
+
+type RaftCommand struct {
+	 RcType RaftCommandType
+	 data interface{} // Op 或 config
 }
 
 type RaftCommandResp struct { // todo : 字段定义

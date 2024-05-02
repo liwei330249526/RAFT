@@ -33,15 +33,15 @@ func TestStaticShards(t *testing.T) {
 	cfg.join(1)
 
 	n := 10
-	ka := make([]string, n)
+	ka := make([]string, n) // 10 个kv
 	va := make([]string, n)
 	for i := 0; i < n; i++ {
 		ka[i] = strconv.Itoa(i) // ensure multiple shards
 		va[i] = randstring(20)
-		ck.Put(ka[i], va[i])
+		ck.Put(ka[i], va[i]) // 写10个kv
 	}
 	for i := 0; i < n; i++ {
-		check(t, ck, ka[i], va[i])
+		check(t, ck, ka[i], va[i]) // 校验10个kv
 	}
 
 	// make sure that the data really is sharded by
