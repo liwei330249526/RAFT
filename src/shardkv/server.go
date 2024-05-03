@@ -26,10 +26,11 @@ type ShardKV struct {
 	notifyChs     map[int]chan RaftCommandResp
 	lastAppliedId int
 
-	stateMachines  map[int]*StateMachine // 每个shard 一个 stateMachine
+	stateMachines map[int]*StateMachine       // 每个shard 一个 stateMachine
 	duplicateReqM map[int]LastRaftCommandResp // 某个clinet 的最后一条消息的结果和 seqId
 	dead          int32
 	curConfig     shardctrler.Config
+	preConfig     shardctrler.Config
 	mck           *shardctrler.Clerk
 }
 
@@ -258,7 +259,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	go kv.applyKvRaftTask()
 
-	go kv.getConfig()
+	go kv.getConfigTask()
+
+	go kv.handleConfigChangeTask()
 	return kv
 }
 
@@ -301,10 +304,11 @@ func (kv *ShardKV)applyKvRaftTask() {
 							kv.duplicateReqM[op.ClientId] = LastRaftCommandResp{op.SeqId,result}
 						}
 					}
-				} else {
-					result = kv.handleConfig(rc)
+				} else if rc.RcType == ConfigChange {
+					result = kv.ApplyHandleConfig(rc)
+				} else if rc.RcType == ShardMigration {
+					result = kv.ApllyHandShardMigration(rc)
 				}
-
 
 				// 判断如果是leader， 则通过 notifyChanle 将结果返回客户端
 				if _, isLeader := kv.rf.GetState(); isLeader { // get 一直没等到，返回了也 delete 了chan， 然后这里应用了，chan一直等待
@@ -377,32 +381,98 @@ func (kv *ShardKV) restoreSnapshot(snapshot []byte) {
 	return
 }
 
-func (kv *ShardKV) getConfig() {
-	// 这里每个节点都会各自查询config 到自己节点；
+func (kv *ShardKV) getConfigTask() {
+	// 这里 leader 节点都会各自查询config 到自己节点；
 	// 应该改为， 查到新的后，交给raft 模块处理， 日志应用后，说明3个 replica 都共识了 config 变更
 	// 日志应用时，每个节点进行 config 变更的实施，config变更，data变更。
 	for !kv.killed() {
-		kv.mu.Lock()
-		//config := kv.mck.Query(-1)
-		//kv.curConfig = config
+		if _, isLeader := kv.rf.GetState(); isLeader {
+			kv.mu.Lock()
+			//config := kv.mck.Query(-1)
+			//kv.curConfig = config
 
-		num := kv.curConfig.Num
-		config := kv.mck.Query(num+1)
+			needGet := true
+			kv.mu.Lock()
+			// 如果有 shard 再 迁移， 则本次不做迁移
+			for _, stateMachine := range kv.stateMachines {
+				if stateMachine.state != ShardNormal {
+					needGet = false
+					break
+				}
+			}
+			kv.mu.Unlock()
 
-		resp := RaftCommandResp{}
-		kv.configChange(RaftCommand{
-			RcType: ConfigChange,
-			data: config,
-		}, &resp)
+			if !needGet {
+				continue
+			}
 
-		kv.mu.Unlock()
+			num := kv.curConfig.Num
+			config := kv.mck.Query(num+1) // leader 节点查询最新到最新配置
 
-		time.Sleep(GetConfigInterval)
+			if config.Num == num+1 {
+				resp := RaftCommandResp{}
+				kv.RaftCommandSend(
+					RaftCommand{ // 将最新配置信息通过raft 模块做多副本共识
+					RcType: ConfigChange,
+					data: config,
+					},
+					&resp)
+			}
+
+			time.Sleep(GetConfigInterval)
+		}
+
+	}
+}
+
+func (kv *ShardKV)handleConfigChangeTask() {
+	// 获取所有 move in 的 shard， 做处理
+	// 获取所有 move out 的shard ， 做处理
+	for !kv.killed() {
+		if _, isLeader := kv.rf.GetState(); isLeader {
+			kv.mu.Lock()
+			gidToShards := kv.getShardsByState(ShardMoveIn)
+			// 迁移数据进来
+			// 对每个gid 并行发送请求
+			var w sync.WaitGroup
+			for gid, shards := range gidToShards {
+				w.Add(1)
+				// 遍历group 的每个节点，从leader 获取 shards 数据
+				// req, resp
+				go func(configNum int, shards []int, servers []string) {
+					defer w.Done()
+					req := ShardDataGetArgs {
+						CofigNum: configNum,
+						Shards: shards,
+					}
+					// 从原来的group 对应的shards 拿到对应的数据
+					for _, server := range servers {
+						resp := ShardDataGetResp{}
+						cl := kv.make_end(server)
+						// rpc 调用
+						ok := cl.Call("ShardKV.GetShardsData", &req, &resp)
+						if ok && resp.Err == OK {
+							// 获取了对应的数据，执行 shard 迁移
+							// 这个 shard 迁移的命令通过raft 共识后， 可以在apply 协程中处理 shard 迁移
+							var raftResp RaftCommandResp
+							kv.RaftCommandSend(RaftCommand{RcType: ShardMigration, data: resp}, &raftResp)
+						}
+					}
+
+
+				}(kv.preConfig.Num, shards, kv.preConfig.Groups[gid])
+			}
+
+			w.Wait()
+			kv.mu.Unlock()
+			time.Sleep(handleConfigChangeInterval)
+		}
+
 	}
 }
 
 // 处理config 更新
-func (kv *ShardKV) handleConfig(rc RaftCommand) RaftCommandResp {
+func (kv *ShardKV) ApplyHandleConfig(rc RaftCommand) RaftCommandResp {
 	switch rc.RcType {
 	case ConfigChange:
 		newConfig := rc.data.(shardctrler.Config)
@@ -410,7 +480,7 @@ func (kv *ShardKV) handleConfig(rc RaftCommand) RaftCommandResp {
 	}
 }
 
-func (kv *ShardKV) configChange(command RaftCommand, reply *RaftCommandResp) {
+func (kv *ShardKV) RaftCommandSend(command RaftCommand, reply *RaftCommandResp) {
 	index, _, isLeader := kv.rf.Start(command)
 	if !isLeader {
 		reply.Err = ErrWrongLeader
@@ -455,12 +525,94 @@ func (kv *ShardKV) handleConfigChange(newConfig shardctrler.Config) (resp RaftCo
 	for i := 0; i < shardctrler.NShards; i++ {
 		if kv.curConfig.Shards[i] != kv.gid && newConfig.Shards[i] == kv.gid {
 			// 迁入的shard
+			if kv.curConfig.Shards[i] != 0 {
+				kv.stateMachines[i].state = ShardMoveIn
+			}
+
 		} else if kv.curConfig.Shards[i] == kv.gid && newConfig.Shards[i] != kv.gid {
 			// 迁出的shard
+			if newConfig.Shards[i] != 0 {
+				kv.stateMachines[i].state = ShardMoveOut
+			}
+		}
+	}
+	kv.preConfig = kv.curConfig
+	kv.curConfig = newConfig
+	resp.Err = OK
+	return
+}
+
+// 处理数据迁移，数据迁移到这里来了, 包括data ，和去重表
+func (kv *ShardKV) ApllyHandShardMigration(rc RaftCommand) (resp RaftCommandResp) {
+	sData := rc.data.(ShardDataGetResp)
+	if sData.ConfigNum != kv.curConfig.Num {
+		resp.Err = ErrConfigNum
+		return
+	}
+
+	// 遍历将每个 stateMachine 的数据拷贝到 kv 本机 stateMachines 中
+	for shardId , stateMachine := range sData.Data {
+		if kv.stateMachines[shardId].state != ShardMoveIn {
+			break
+		}
+		for k, v := range stateMachine {
+			kv.stateMachines[shardId].Mem[k] = v
+		}
+		kv.stateMachines[shardId].state = ShardGc
+	}
+
+	for clientId, msNew := range sData.DuplicateTable {
+		msOld, ok := kv.duplicateReqM[clientId]
+		if !ok || msOld.SeqId < msNew.SeqId {
+			kv.duplicateReqM[clientId] = msNew
+		}
+	}
+	return
+}
+
+// 获取 gid 对应的哪些 shard; 需要被迁移
+func (kv *ShardKV) getShardsByState(state ShardState) map[int][]int {
+	gidToShards := make(map[int][]int)
+
+	for shardId, sm := range kv.stateMachines {
+		if sm.state == state {
+			gid := kv.preConfig.Shards[shardId]
+			if gid != 0 {
+				gidToShards[gid] = append(gidToShards[gid], shardId)
+			}
 		}
 	}
 
-	kv.curConfig = newConfig
-	resp.Err = OK
+	return gidToShards
+}
+
+// 只从leader 获取数据即可;
+func (kv *ShardKV) GetShardsData(args *ShardDataGetArgs, resp *ShardDataGetResp) {
+	// 只从leader 获取数据
+	if _, isLeader := kv.rf.GetState(); !isLeader {
+		resp.Err = ErrWrongLeader
+		return
+	}
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	// 如果配置不是我们想要的，即， 还未准备好数据迁移，的配置信息。
+	if kv.curConfig.Num < args.CofigNum {
+		resp.Err = ErrConfigNum
+		return
+	}
+
+	// 拷贝data
+	resp.Data = make(map[int]map[string]string )
+	for _, shardId := range args.Shards {
+		resp.Data[shardId] = kv.stateMachines[shardId].CopyData()
+	}
+
+	// 拷贝duplicaTable
+	resp.DuplicateTable = make(map[int]LastRaftCommandResp)
+	for k, v := range kv.duplicateReqM {
+		resp.DuplicateTable[k] = v
+	}
+
 	return
 }

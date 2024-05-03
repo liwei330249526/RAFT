@@ -17,6 +17,7 @@ const (
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrWrongLeader = "ErrWrongLeader"
 
+
 	ErrTimeOut     = "ErrTimeOut"
 	ErrConfigNum   = "ErrConfigNum"
 	ErrKeyNotExist = "ErrKeyNotExist"
@@ -26,6 +27,7 @@ const (
 const (
 	TimeOut = time.Millisecond * 500
 	GetConfigInterval = time.Millisecond * 100
+	handleConfigChangeInterval = time.Millisecond * 50
 )
 
 
@@ -68,10 +70,19 @@ const (
 )
 
 type RaftCommandType uint32
-
 const (
 	ClientCmd RaftCommandType = iota
 	ConfigChange
+	ShardMigration
+)
+
+type ShardState uint32
+
+const (
+	ShardNormal ShardState = iota
+	ShardMoveIn
+	ShardMoveOut
+	ShardGc
 )
 
 type Op struct { // todo: 字段定义
@@ -95,4 +106,16 @@ type RaftCommandResp struct { // todo : 字段定义
 type LastRaftCommandResp struct {
 	SeqId int
 	Rc    RaftCommandResp
+}
+
+type ShardDataGetArgs struct {
+	CofigNum int
+	Shards []int
+}
+
+type ShardDataGetResp struct {
+	Err Err
+	ConfigNum int
+	Data map[int]map[string]string // 每个shard 的数据
+	DuplicateTable map[int]LastRaftCommandResp // 每个shard 的去重表信息
 }

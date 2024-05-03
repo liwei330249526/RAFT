@@ -4,7 +4,8 @@ import "fmt"
 
 // 基于内存的kv ， 可以转化为基于磁盘的kv
 type StateMachine struct {
-	Mem map[string]string
+	Mem   map[string]string
+	state ShardState
 }
 
 func NewStateMachine() *StateMachine {
@@ -27,6 +28,14 @@ func (s *StateMachine)Put(key string, val string) Err {
 func (s *StateMachine)Append(key string, val string) Err {
 	s.Mem[key] += val
 	return OK
+}
+
+func (s *StateMachine)CopyData() map[string]string {
+	newMem := make(map[string]string)
+	for k, v := range s.Mem {
+		newMem[k] = v
+	}
+	return newMem
 }
 
 // 状态机应用日志, todo: 可改为cckv 的单机存储引擎
