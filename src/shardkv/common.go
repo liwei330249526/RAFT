@@ -28,6 +28,8 @@ const (
 	TimeOut = time.Millisecond * 500
 	GetConfigInterval = time.Millisecond * 100
 	handleConfigChangeInterval = time.Millisecond * 50
+
+	ShardGcInterval = time.Millisecond * 50
 )
 
 
@@ -71,9 +73,10 @@ const (
 
 type RaftCommandType uint32
 const (
-	ClientCmd RaftCommandType = iota
-	ConfigChange
-	ShardMigration
+	RCClientCmd RaftCommandType = iota
+	RCConfigChange
+	RCShardMigration
+	RCShardDataGc
 )
 
 type ShardState uint32
@@ -118,4 +121,15 @@ type ShardDataGetResp struct {
 	ConfigNum int
 	Data map[int]map[string]string // 每个shard 的数据
 	DuplicateTable map[int]LastRaftCommandResp // 每个shard 的去重表信息
+}
+
+
+type ShardDataGcReq struct {
+	ConfigNum int
+	Shards    []int
+}
+
+type ShardDataGcResp struct {
+	Err Err
+	ConfigNum int
 }
