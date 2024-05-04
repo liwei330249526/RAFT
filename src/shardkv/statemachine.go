@@ -1,16 +1,15 @@
 package shardkv
 
-import "fmt"
-
 // 基于内存的kv ， 可以转化为基于磁盘的kv
 type StateMachine struct {
 	Mem   map[string]string
-	state ShardState
+	State ShardState
 }
 
 func NewStateMachine() *StateMachine {
 	return &StateMachine{
 		Mem: make(map[string]string),
+		State: ShardNormal,
 	}
 }
 
@@ -43,15 +42,15 @@ func (s *StateMachine)Apply(rc Op) RaftCommandResp {
 	res := RaftCommandResp{}
 	if rc.CmdType == CmdTypeGet {
 		val, err := s.Get(rc.Key)
-		fmt.Printf("get op is key:%s, val:%s, clientId: %d, seqId: %d\n", rc.Key, val, rc.ClientId, rc.SeqId)
+		//fmt.Printf("get op is key:%s, val:%s, clientId: %d, seqId: %d\n", rc.Key, val, rc.ClientId, rc.SeqId)
 		res.Val = val
 		res.Err = err
 	} else if rc.CmdType == CmdTypePut {
 		err := s.Put(rc.Key, rc.Val)
-		fmt.Printf("put op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
+		//fmt.Printf("put op is key:%s, val:%s, clientId %d, seq %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
 		res.Err = err
 	} else if rc.CmdType == CmdTypeAppend {
-		fmt.Printf("append op is key:%s, val:%s, clientId %d, clientId %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
+		//fmt.Printf("append op is key:%s, val:%s, clientId %d, seq %d\n", rc.Key, rc.Val, rc.ClientId, rc.SeqId)
 		err := s.Append(rc.Key, rc.Val)
 		res.Err = err
 	}

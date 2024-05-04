@@ -98,7 +98,7 @@ type Op struct { // todo: 字段定义
 
 type RaftCommand struct {
 	 RcType RaftCommandType
-	 data interface{} // Op 或 config
+	 Data   interface{} // Op 或 config
 }
 
 type RaftCommandResp struct { // todo : 字段定义
@@ -111,25 +111,50 @@ type LastRaftCommandResp struct {
 	Rc    RaftCommandResp
 }
 
-type ShardDataGetArgs struct {
+func(l *LastRaftCommandResp)copyData() LastRaftCommandResp {
+	return LastRaftCommandResp{
+		SeqId: l.SeqId,
+		Rc:RaftCommandResp{
+			Err: l.Rc.Err,
+			Val: l.Rc.Val,
+		},
+	}
+}
+
+// rpc 获取数据请求
+type RpcShardDataGetArgs struct {
 	CofigNum int
 	Shards []int
 }
 
-type ShardDataGetResp struct {
+// rpc 获取数据回复
+type RpcShardDataGetResp struct {
 	Err Err
 	ConfigNum int
 	Data map[int]map[string]string // 每个shard 的数据
 	DuplicateTable map[int]LastRaftCommandResp // 每个shard 的去重表信息
 }
 
-
-type ShardDataGcReq struct {
+// rpc gc shard 的请求
+type RpcShardDataGcReq struct {
 	ConfigNum int
 	Shards    []int
 }
 
-type ShardDataGcResp struct {
+// rpc gc shard 回复
+type RpcShardDataGcResp struct {
 	Err Err
 	ConfigNum int
 }
+
+
+type RaftShardDataGcReq struct {
+	ConfigNum int
+	Shards    []int
+}
+
+type RaftShardDataGcResp struct {
+	Err Err
+	ConfigNum int
+}
+

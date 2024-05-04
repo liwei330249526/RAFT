@@ -132,7 +132,7 @@ func getMaxShardGid(gidToShards map[int][]int) int {
 	mCount := -1
 	for _, gid := range gids{
 		// 最小的gid 组是接受 shard 的组，不能为 0 组
-		if gid != 0 && mCount < len(gidToShards[gid]){
+		if  mCount < len(gidToShards[gid]){
 			mCount = len(gidToShards[gid])
 			mGid = gid
 		}

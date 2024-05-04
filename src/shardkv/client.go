@@ -8,7 +8,9 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import "course/labrpc"
+import (
+	"course/labrpc"
+)
 import "crypto/rand"
 import "math/big"
 import "course/shardctrler"
@@ -113,14 +115,18 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
 				var reply PutAppendReply
+				//fmt.Printf("client: PutAppend key:%s, val:%s\n", key, value)
 				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
 				if ok && reply.Err == OK {
 					ck.seqId++
 					return
 				}
+				//fmt.Printf("client resp: PutAppend key:%s, err %s\n", key, reply.Err)
+
 				if ok && reply.Err == ErrWrongGroup {
 					break
 				}
+
 				// ... not ok, or ErrWrongLeader
 			}
 		}
