@@ -1,16 +1,28 @@
 package shardkv
 
+import "github.com/liwei330249526/cckv"
+
 // 基于内存的kv ， 可以转化为基于磁盘的kv
 type StateMachine struct {
+	db *cckv.DB
 	Mem   map[string]string
 	State ShardState
 }
 
 func NewStateMachine() *StateMachine {
 	return &StateMachine{
+		db:cckv.OpenDb("/tmp/cckv"),
 		Mem: make(map[string]string),
 		State: ShardNormal,
 	}
+}
+
+func (s *StateMachine)GetDb(key string) (string, Err) {
+	val := s.db.Get([]byte(key))
+	if et == nil {
+		return "", ErrNoKey
+	}
+	return val, OK
 }
 
 func (s *StateMachine)Get(key string) (string, Err) {
@@ -24,8 +36,18 @@ func (s *StateMachine)Put(key string, val string) Err {
 	return OK
 }
 
+func (s *StateMachine)PutDb(key string, val string) Err {
+	s.db.Put([]byte(key), []byte(val))
+	return OK
+}
+
 func (s *StateMachine)Append(key string, val string) Err {
 	s.Mem[key] += val
+	return OK
+}
+
+func (s *StateMachine)AppendDb(key string, val string) Err {
+	s.db.Append([]byte(key), []byte(val))
 	return OK
 }
 
@@ -34,6 +56,11 @@ func (s *StateMachine)CopyData() map[string]string {
 	for k, v := range s.Mem {
 		newMem[k] = v
 	}
+	return newMem
+}
+
+func (s *StateMachine)CopyData() map[string]string {
+	newMem := s.db.CopyData()
 	return newMem
 }
 
