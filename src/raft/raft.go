@@ -35,10 +35,10 @@ const (
 	replicateInterval time.Duration = 30 * time.Millisecond
 )
 
-const (
-	InvalidTerm  int = 0
-	InvalidIndex int = 0
-)
+//const (
+//	InvalidTerm  int = 0
+//	InvalidIndex int = 0
+//)
 
 type Role string
 

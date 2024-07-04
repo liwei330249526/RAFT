@@ -1,6 +1,6 @@
 export PATH=$PATH:/usr/local/go/bin
 export GOROOT=/usr/local/go
-export GOPATH=/home/liwei/books/raft-course/src/github.com/raft-course
+export GOPATH=/home/liwei/books/raft-course/src
 export GO111MODULE=on
 
 

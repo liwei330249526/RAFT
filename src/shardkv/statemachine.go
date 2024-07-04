@@ -18,11 +18,11 @@ func NewStateMachine() *StateMachine {
 }
 
 func (s *StateMachine)GetDb(key string) (string, Err) {
-	val := s.db.Get([]byte(key))
-	if et == nil {
-		return "", ErrNoKey
-	}
-	return val, OK
+	s.db.Get([]byte(key))
+	//if et == nil {
+	//	return "", ErrNoKey
+	//}
+	return "", OK
 }
 
 func (s *StateMachine)Get(key string) (string, Err) {
@@ -47,7 +47,7 @@ func (s *StateMachine)Append(key string, val string) Err {
 }
 
 func (s *StateMachine)AppendDb(key string, val string) Err {
-	s.db.Append([]byte(key), []byte(val))
+	//s.db.Append([]byte(key), []byte(val))
 	return OK
 }
 
@@ -59,10 +59,6 @@ func (s *StateMachine)CopyData() map[string]string {
 	return newMem
 }
 
-func (s *StateMachine)CopyData() map[string]string {
-	newMem := s.db.CopyData()
-	return newMem
-}
 
 // 状态机应用日志, todo: 可改为cckv 的单机存储引擎
 func (s *StateMachine)Apply(rc Op) RaftCommandResp {
