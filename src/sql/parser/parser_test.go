@@ -71,3 +71,62 @@ func TestParserSelect(t *testing.T) {
 	})
 }
 
+func TestParserInsert(t *testing.T) {
+	var p *Parser
+	Convey("INSERT SQL with Column names", t, func() {
+		p = &Parser{}
+		ast, err := p.ParseInsert("INSERT INTO table_name(column1, column2) VALUES (value1, value2)")
+		So(err, ShouldBeNil)
+		So(ast.Table, ShouldEqual, "table_name")
+		So(ast.Columns, ShouldResemble, []string{"column1", "column2"})
+		So(ast.Values, ShouldResemble, [][]string{{"value1", "value2"}})
+	})
+
+	Convey("column count miss match", t, func() {
+		p = &Parser{}
+		_, err := p.ParseInsert("INSERT INTO table_name(column1, column2, column3) VALUES (value1, value2)")
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "INSERT INTO table_name(column1, column2, column3) VALUES (value1, value2) column and values not match") // values 数量不对
+	})
+
+	Convey("INSERT SQL", t, func() {
+		p = &Parser{}
+		ast, err := p.ParseInsert("INSERT INTO table_name VALUES (value1, value2)")
+		So(err, ShouldBeNil)
+		So(ast.Table, ShouldEqual, "table_name")
+		So(ast.Columns, ShouldBeNil)
+		So(ast.Values, ShouldResemble, [][]string{{"value1", "value2"}})
+	})
+
+	Convey("INSERT multiple rows", t, func() {
+		p = &Parser{}
+		ast, err := p.ParseInsert("INSERT INTO table_name VALUES (\"value1\", value2), (\"value3\", value4)")
+		So(err, ShouldBeNil)
+		So(ast.Table, ShouldEqual, "table_name")
+		So(ast.Columns, ShouldBeNil)
+		So(ast.Values, ShouldResemble, [][]string{{"\"value1\"", "value2"}, {"\"value3\"", "value4"}})
+	})
+
+	Convey("INSERT multiple rows 2", t, func() {
+		p = &Parser{}
+		ast, err := p.ParseInsert("INSERT INTO table (id, username, email) VALUES " +
+			"(0, auxten, \"auxtenwpc@gmail.com\")," +
+			"(1, hahaha, \"hahaha@gmail.com\")," +
+			"(2, jijiji, \"jijiji@gmail.com\")")
+		So(err, ShouldBeNil)
+		So(ast.Table, ShouldEqual, "table")
+		So(ast.Columns, ShouldResemble, []string{"id", "username", "email"})
+		So(ast.Values, ShouldResemble, [][]string{{"0", "auxten", "\"auxtenwpc@gmail.com\""},
+			{"1", "hahaha", "\"hahaha@gmail.com\""}, {"2", "jijiji", "\"jijiji@gmail.com\""}})
+	})
+
+	Convey("column count miss match 2", t, func() {
+		p = &Parser{}
+		_, err := p.ParseInsert("INSERT INTO table_name VALUES (value1, value2), (value3, value4, value5)")
+		So(err, ShouldNotBeNil)
+		So(err.Error(), ShouldContainSubstring, "INSERT INTO table_name VALUES (value1, value2), (value3, value4, value5) column and values not match") // 两个values 不等
+	})
+}
+
+
+
