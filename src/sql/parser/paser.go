@@ -12,7 +12,7 @@ const (
 	UNKNOWN = "UNKNOWN"
 	SELECT = "SELECT"
 	FROM = "FROM"
-	WHERE = "Where"
+	WHERE = "WHERE"
 	LIMIT = "LIMIT"
 	INSERT = "INSERT"
 	INTO = "INTO"
@@ -121,7 +121,7 @@ func (p *Parser) ParseSelect(sel string) (ast *SelectAst,err error) {
 
 	// 校验 Where
 	if ret := p.s.Scan(); ret == scanner.EOF {
-		err = fmt.Errorf("%s not have WHERE1", sel)
+		//err = fmt.Errorf("%s not have WHERE1", sel)  // WHERE is not necessary
 		return
 	}
 
