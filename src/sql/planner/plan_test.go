@@ -1,15 +1,71 @@
 package planner
 
 import (
-	"course/sql/parser"
+	"course/sql/rparser"
 	"fmt"
 	. "github.com/smartystreets/goconvey/convey"
 	"go/token"
 	"go/types"
+	. "go/types"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestEvalArith(t *testing.T) {
+	var tests = []string{
+		`true`,
+		`false == false`,
+		`12345678 + 87654321 == 99999999`,
+		`10 * 20 == 200`,
+		`(1<<1000)*2 >> 100 == 2<<900`,
+		`"foo" + "bar" == "foobar"`,
+		`"abc" <= "bcd"`,
+		`len([10]struct{}{}) == 2*5`,
+	}g
+	fset := token.NewFileSet()
+	for _, test := range tests {
+		testEval(t, fset, nil, token.NoPos, test, Typ[UntypedBool], "", "true")
+	}
+}
+
+
+func testEval(t *testing.T, fset *token.FileSet, pkg *Package, pos token.Pos, expr string, typ Type, typStr, valStr string) {
+	gotTv, err := Eval(fset, pkg, pos, expr)
+	if err != nil {
+		t.Errorf("Eval(%q) failed: %s", expr, err)
+		return
+	}
+	if gotTv.Type == nil {
+		t.Errorf("Eval(%q) got nil type but no error", expr)
+		return
+	}
+
+	// compare types
+	if typ != nil {
+		// we have a type, check identity
+		if !Identical(gotTv.Type, typ) {
+			t.Errorf("Eval(%q) got type %s, want %s", expr, gotTv.Type, typ)
+			return
+		}
+	} else {
+		// we have a string, compare type string
+		gotStr := gotTv.Type.String()
+		if gotStr != typStr {
+			t.Errorf("Eval(%q) got type %s, want %s", expr, gotStr, typStr)
+			return
+		}
+	}
+
+	// compare values
+	gotStr := ""
+	if gotTv.Value != nil {
+		gotStr = gotTv.Value.ExactString()
+	}
+	if gotStr != valStr {
+		t.Errorf("Eval(%q) got value %s, want %s", expr, gotStr, valStr)
+	}
+}
 
 // 测试表达式评价
 func TestFunc(t *testing.T) {
@@ -47,7 +103,7 @@ func TestPlan_Insert(t *testing.T) {
 		// 计划
 		plan := NewPlan()
 
-		p := &parser.Parser{}
+		p := &rparser.Parser{}
 		ast, err := p.ParseInsert("INSERT INTO table VALUES " +
 			"(10, f, 28, auxten, \"auxtenwpc@gmail.com\", 13812341234)",
 		)
@@ -58,7 +114,7 @@ func TestPlan_Insert(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(cnt, ShouldEqual, 1)
 
-		p2 := &parser.Parser{}
+		p2 := &rparser.Parser{}
 		ast2, err := p2.ParseSelect("SELECT id, username, email FROM table")
 		So(err, ShouldBeNil)
 
@@ -87,7 +143,7 @@ func TestPlan_Insert_multiple(t *testing.T) {
 		// 计划
 		plan := NewPlan()
 
-		p := &parser.Parser{}
+		p := &rparser.Parser{}
 		ast, err := p.ParseInsert("INSERT INTO table (id, username, email) VALUES " +
 			"(0, auxten, \"auxtenwpc@gmail.com\")," +
 			"(1, hahaha, \"hahaha@gmail.com\")," +
@@ -101,7 +157,7 @@ func TestPlan_Insert_multiple(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(cnt, ShouldEqual, 4)
 
-		p2 := &parser.Parser{}
+		p2 := &rparser.Parser{}
 		ast2, err := p2.ParseSelect("SELECT id, username, email FROM table LIMIT 10")
 		So(err, ShouldBeNil)
 		plan.SetSelect(ast2)
@@ -146,7 +202,7 @@ func TestPlannerSelect(t *testing.T) {
 		plan.InsertRows(tableName, rows)
 
 
-		p := &parser.Parser{}
+		p := &rparser.Parser{}
 
 		sql := fmt.Sprintf("SELECT id, username, email FROM %s WHERE id > 5 AND id < 7 LIMIT 3", tableName)
 		ast, err := p.ParseSelect(sql)
@@ -164,7 +220,7 @@ func TestPlannerSelect(t *testing.T) {
 
 
 		plan.InitChan()
-		p = &parser.Parser{}
+		p = &rparser.Parser{}
 
 		sql = fmt.Sprintf("SELECT id, username, email FROM %s", tableName)
 		ast, err = p.ParseSelect(sql)

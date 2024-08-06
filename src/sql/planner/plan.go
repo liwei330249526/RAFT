@@ -2,7 +2,7 @@ package planner
 
 import (
 	"course/shardkv"
-	"course/sql/parser"
+	"course/sql/rparser"
 	"fmt"
 	"go/token"
 	"go/types"
@@ -21,8 +21,8 @@ func GetMaxRowIdKey(tableName string) string {
 }
 
 type Plan struct {
-	insAst *parser.InsertAst
-	selAst *parser.SelectAst
+	insAst *rparser.InsertAst
+	selAst *rparser.SelectAst
 	client *shardkv.SqlDbClient
 	rowDataOut chan *Row
 	filteredDataOut chan *Row
@@ -44,12 +44,12 @@ func (p *Plan)InitChan() {
 	p.limitedDataOut = make(chan *Row)
 }
 
-func (p *Plan)SetInsert(insAst *parser.InsertAst) {
+func (p *Plan)SetInsert(insAst *rparser.InsertAst) {
 	p.insAst = insAst
 	return
 }
 
-func (p *Plan)SetSelect(selAst *parser.SelectAst) {
+func (p *Plan)SetSelect(selAst *rparser.SelectAst) {
 	p.selAst = selAst
 	return
 
